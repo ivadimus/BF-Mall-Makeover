@@ -502,7 +502,7 @@ body {
   height: 100%;
   pointer-events: none;
   display: block;
-  z-index: 1;
+  z-index: 7;
 }
 
 .sponge-sparkles {
@@ -660,9 +660,9 @@ body {
 
 .cell-icon {
   position: absolute;
-  width: 84px;
-  height: 98px;
-  margin: -54px 0 0 -42px;
+  width: 75.6px;
+  height: 88.2px;
+  margin: -48.6px 0 0 -37.8px;
   padding: 0;
   border: none;
   background: transparent;
@@ -698,9 +698,9 @@ body {
   position: absolute;
   left: 50%;
   top: 44%;
-  /* 20% larger than the original 64px */
-  width: 77px;
-  height: 77px;
+  /* 20% larger than the original 64px, then −10% on the whole peak */
+  width: 69.3px;
+  height: 69.3px;
   margin: 0;
   box-sizing: border-box;
   border-radius: 50%;
@@ -708,15 +708,17 @@ body {
   background: rgba(0, 0, 0, 0.6);
   /* 1px white outline, softened (blurred) edge */
   border: 1px solid rgba(255, 255, 255, 0.8);
-  /* blur the outline + small white glow around the circle */
+  /* White halo on the circle only — biased up/sides, not under the pin */
   box-shadow:
-    0 0 2px 0 rgba(255, 255, 255, 0.7),
-    inset 0 0 2px 0 rgba(255, 255, 255, 0.45),
-    0 0 10px 3px rgba(255, 255, 255, 0.5),
-    0 0 22px 7px rgba(255, 255, 255, 0.3);
+    0 0 2px 0 rgba(255, 255, 255, 0.9),
+    inset 0 0 2px 0 rgba(255, 255, 255, 0.5),
+    0 -2px 7px 1px rgba(255, 255, 255, 0.82),
+    -4px 0 7px 0 rgba(255, 255, 255, 0.55),
+    4px 0 7px 0 rgba(255, 255, 255, 0.55),
+    0 1px 4px 0 rgba(255, 255, 255, 0.25);
   /* frosted blur of the picture behind the circle (20px + 30%) */
-  -webkit-backdrop-filter: blur(var(--plate-blur, 26px));
-  backdrop-filter: blur(var(--plate-blur, 26px));
+  -webkit-backdrop-filter: blur(var(--plate-blur, 23.4px));
+  backdrop-filter: blur(var(--plate-blur, 23.4px));
   transform: translate(-50%, -50%);
   z-index: 1;
   pointer-events: none;
@@ -726,13 +728,14 @@ body {
 .cell-icon-sku {
   position: relative;
   z-index: 2;
-  width: 58px;
+  width: 52.2px;
   height: auto;
   margin-top: 0;
   object-fit: contain;
   pointer-events: none;
   display: block;
   order: 1;
+  filter: drop-shadow(0 -1px 3px rgba(255, 255, 255, 0.88));
 }
 
 /* Front: number below icon, tucked slightly up onto it */
@@ -740,12 +743,12 @@ body {
   position: relative;
   z-index: 3;
   order: 2;
-  margin-top: -18px;
-  font-size: 19.2pt;
+  margin-top: -7.2px;
+  font-size: 19.08pt;
   font-weight: 800;
   line-height: 1;
   color: #fff;
-  -webkit-text-stroke: 3px #000;
+  -webkit-text-stroke: 4.05px #000;
   paint-order: stroke fill;
   text-shadow: 0 2px 0 #000;
   pointer-events: none;
@@ -1337,7 +1340,7 @@ body {
    number stays in the same place on it; the layout box is unchanged. */
 .cell-icon-sku {
   /* 1.2 × 1.2 = 44% larger than the original picture, 10px lower */
-  transform: translateY(10px) scale(1.44);
+  transform: translateY(9px) scale(1.44);
   transform-origin: 50% 75%;
 }
 
@@ -1941,12 +1944,17 @@ window.RESULT_IMAGES = {
   /** Timeline, as parts of WIPE_MS. */
   const BRUSH_PICKUP_END = 0.08; // icon brush grows in place, right where it stood
   const BRUSH_SWEEP_END = 0.86; // side-to-side sweeping inside the local area
-  /** From here the rest of the piece dissolves, gone exactly when the clean ends. */
-  const BRUSH_FADE_START = 0.78;
+  /** Final mask dissolve: last ~40% of WIPE_MS (44% longer than the original 28% tail). */
+  const BRUSH_FADE_START = 1 - 0.28 * 1.2 * 1.2;
+  const DISSOLVE_FEATHER = 32;
   /** Brush width while cleaning (it grows to this from the icon size). */
   const BRUSH_SIZE_PX = 90;
   /** Radius of the cleaned trail — 30% smaller than the first brush version. */
   const BRUSH_TRAIL_RADIUS_PX = 112 * 0.4 * 0.7;
+  /** Blur on each brush stamp (softer wipe edge). */
+  const BRUSH_TRAIL_BLUR_PX = 14;
+  /** Extra blur when the swept trail is composited onto the piece. */
+  const BRUSH_TRAIL_BLEND_BLUR_PX = 5;
   /** The brush only sweeps a local square around the number, in stage px. */
   const BRUSH_AREA_PX = 200;
   /** Point on the brush picture (0–1) that touches the scene: middle of the bristles. */
@@ -2130,6 +2138,10 @@ window.RESULT_IMAGES = {
   brushImage.decoding = "async";
   brushImage.src = BRUSH_IMAGE_URL;
 
+  const dissolveImage = new Image();
+  dissolveImage.decoding = "async";
+  dissolveImage.src = "assets/dissolve.png";
+
   /**
    * Soft dust cloud: puffs up, drifts away (pushed by the brush) and fades.
    * opts.dx / opts.dy = drift direction, opts.size, opts.delay, opts.duration.
@@ -2190,14 +2202,14 @@ window.RESULT_IMAGES = {
     };
   }
 
-  const ICON_SIZE_PX = 84;
+  const ICON_SIZE_PX = 75.6;
   /** Clear space kept between two number plates. */
   const ICON_MIN_GAP_PX = 30;
   /** Matches .cell-icon size + negative margin (anchor = center of plate). */
-  const ICON_HALF_W_PX = 42;
-  // 54px plate + room for the 20% larger brush icon sticking out above it.
-  const ICON_EXTENT_TOP_PX = 62;
-  const ICON_EXTENT_BOTTOM_PX = 44;
+  const ICON_HALF_W_PX = 37.8;
+  // Peak layout (−10%): plate + room for the brush icon above it.
+  const ICON_EXTENT_TOP_PX = 55.8;
+  const ICON_EXTENT_BOTTOM_PX = 39.6;
 
   /** Bottom edge of the Header.png artwork, in play-area pixels. */
   function headerBottomPx() {
@@ -3177,33 +3189,37 @@ window.RESULT_IMAGES = {
    * scrub trail keeps a spongy edge instead of a clean circle.
    */
   function buildSpongeStamp(radius) {
-    const size = Math.max(8, Math.ceil(radius * 2));
+    const blur = BRUSH_TRAIL_BLUR_PX;
+    const pad = Math.ceil(blur * 2.5);
+    const core = Math.max(8, Math.ceil(radius * 2));
+    const size = core + pad * 2;
     const stamp = document.createElement("canvas");
     stamp.width = size;
     stamp.height = size;
     const sctx = stamp.getContext("2d");
-    const c = size / 2;
+    const c = pad + core / 2;
+    const r = radius;
 
-    const grad = sctx.createRadialGradient(c, c, radius * 0.12, c, c, radius);
+    const grad = sctx.createRadialGradient(c, c, r * 0.06, c, c, r * 1.05);
     grad.addColorStop(0, "rgba(255,255,255,1)");
-    grad.addColorStop(0.62, "rgba(255,255,255,0.92)");
-    grad.addColorStop(0.85, "rgba(255,255,255,0.42)");
+    grad.addColorStop(0.42, "rgba(255,255,255,0.93)");
+    grad.addColorStop(0.7, "rgba(255,255,255,0.58)");
+    grad.addColorStop(0.9, "rgba(255,255,255,0.2)");
     grad.addColorStop(1, "rgba(255,255,255,0)");
     sctx.fillStyle = grad;
     sctx.beginPath();
-    sctx.arc(c, c, radius, 0, Math.PI * 2);
+    sctx.arc(c, c, r, 0, Math.PI * 2);
     sctx.fill();
 
-    // Pore-like bumps around the rim so the trail edge is irregular.
     const rnd = mulberry32(1337);
     for (let i = 0; i < 26; i++) {
       const ang = rnd() * Math.PI * 2;
-      const rad = radius * (0.6 + rnd() * 0.36);
+      const rad = r * (0.55 + rnd() * 0.4);
       const bx = c + Math.cos(ang) * rad;
       const by = c + Math.sin(ang) * rad;
-      const br = radius * (0.1 + rnd() * 0.16);
+      const br = r * (0.12 + rnd() * 0.2);
       const bg = sctx.createRadialGradient(bx, by, 0, bx, by, br);
-      bg.addColorStop(0, "rgba(255,255,255,0.55)");
+      bg.addColorStop(0, "rgba(255,255,255,0.45)");
       bg.addColorStop(1, "rgba(255,255,255,0)");
       sctx.fillStyle = bg;
       sctx.beginPath();
@@ -3211,7 +3227,14 @@ window.RESULT_IMAGES = {
       sctx.fill();
     }
 
-    return stamp;
+    const soft = document.createElement("canvas");
+    soft.width = size;
+    soft.height = size;
+    const softCtx = soft.getContext("2d");
+    softCtx.filter = `blur(${blur}px)`;
+    softCtx.drawImage(stamp, 0, 0);
+    softCtx.filter = "none";
+    return soft;
   }
 
   /** Left/right edge of the piece along the horizontal line at y. */
@@ -3385,6 +3408,59 @@ window.RESULT_IMAGES = {
     return c * c * (3 - 2 * c);
   }
 
+  function prepareDissolveField(bbox, width, height) {
+    if (!dissolveImage.complete || dissolveImage.naturalWidth === 0) return null;
+    try {
+      const x = Math.max(0, Math.floor(bbox.minX) - 2);
+      const y = Math.max(0, Math.floor(bbox.minY) - 2);
+      const w = Math.max(1, Math.min(width - x, Math.ceil(bbox.maxX) - x + 4));
+      const h = Math.max(1, Math.min(height - y, Math.ceil(bbox.maxY) - y + 4));
+      const sample = document.createElement("canvas");
+      sample.width = w;
+      sample.height = h;
+      const sctx = sample.getContext("2d", { willReadFrequently: true });
+      sctx.drawImage(dissolveImage, 0, 0, w, h);
+      const img = sctx.getImageData(0, 0, w, h);
+      const lum = new Uint8Array(w * h);
+      for (let i = 0, p = 0; i < img.data.length; i += 4, p++) {
+        lum[p] = img.data[i];
+      }
+      const hole = document.createElement("canvas");
+      hole.width = w;
+      hole.height = h;
+      const holeCtx = hole.getContext("2d");
+      const holeData = holeCtx.createImageData(w, h);
+      return { x, y, w, h, lum, hole, holeCtx, holeData };
+    } catch (err) {
+      console.warn("Dissolve mask unavailable:", err);
+      return null;
+    }
+  }
+
+  function endDissolveProgress(t) {
+    if (t < BRUSH_FADE_START) return 0;
+    return smoothstep((t - BRUSH_FADE_START) / (1 - BRUSH_FADE_START));
+  }
+
+  function drawDissolveHole(ctx, field, progress) {
+    const cutoff = Math.min(1, Math.max(0, progress)) * 256;
+    const feather = Math.max(8, DISSOLVE_FEATHER);
+    const px = field.holeData.data;
+    const lum = field.lum;
+    for (let i = 0; i < lum.length; i++) {
+      const d = cutoff - lum[i];
+      let alpha = 0;
+      if (d > 0) {
+        alpha = d >= feather ? 255 : Math.round(255 * (d / feather));
+      }
+      const o = i * 4;
+      px[o] = px[o + 1] = px[o + 2] = 255;
+      px[o + 3] = alpha;
+    }
+    field.holeCtx.putImageData(field.holeData, 0, 0);
+    ctx.drawImage(field.hole, field.x, field.y);
+  }
+
   /**
    * Clears a piece: the icon's brush lifts off, sweeps side to side over a
    * local area around the number kicking up dust clouds, and the rest of the
@@ -3400,9 +3476,25 @@ window.RESULT_IMAGES = {
     }
 
     if (!stateAImage.complete || stateAImage.naturalWidth === 0) {
-      cellEl.classList.add("is-gone");
-      commitDustHole(buildSoftCellMask(layoutWidth, layoutHeight, polygon));
-      onDone();
+      let started = false;
+      const kick = () => {
+        if (started) return;
+        if (!stateAImage.complete || stateAImage.naturalWidth === 0) return;
+        started = true;
+        startBrushWipe(cellId, onDone, opts);
+      };
+      stateAImage.addEventListener("load", kick, { once: true });
+      setTimeout(() => {
+        if (started) return;
+        if (stateAImage.complete && stateAImage.naturalWidth > 0) {
+          kick();
+          return;
+        }
+        started = true;
+        cellEl.classList.add("is-gone");
+        commitDustHole(buildSoftCellMask(layoutWidth, layoutHeight, polygon));
+        onDone();
+      }, 150);
       return;
     }
 
@@ -3504,6 +3596,8 @@ window.RESULT_IMAGES = {
     swept.width = width;
     swept.height = height;
     const sweptCtx = swept.getContext("2d");
+    let dissolve = null;
+    let dissolveFailed = false;
 
     const stampRadius = BRUSH_TRAIL_RADIUS_PX;
     const stamp = buildSpongeStamp(stampRadius);
@@ -3567,15 +3661,15 @@ window.RESULT_IMAGES = {
     /** Dust clouds kicked up ahead of the bristles, drifting the way the brush moves. */
     function emitPuffs(p) {
       const now = performance.now();
-      if (now - lastPuffAt < 45) return;
+      if (now - lastPuffAt < 28) return;
       lastPuffAt = now;
       const atTurn = p.turn > 0.85;
-      const count = atTurn ? 2 : 1 + (Math.random() < 0.5 ? 1 : 0);
+      const count = atTurn ? 4 : 2 + (Math.random() < 0.65 ? 1 : 0);
       for (let i = 0; i < count; i++) {
         const ahead = p.dir * (stampRadius * (0.5 + Math.random() * 0.7));
-        const spreadY = (Math.random() - 0.5) * stampRadius * 1.3;
+        const spreadY = (Math.random() - 0.5) * stampRadius * 1.5;
         spawnDustPuff(fxLayer, p.x + ahead, p.y + spreadY, {
-          size: 16 + Math.random() * (atTurn ? 26 : 18),
+          size: 18 + Math.random() * (atTurn ? 28 : 22),
           dx: p.dir * (28 + Math.random() * 40),
           dy: -(8 + Math.random() * 24) + spreadY * 0.3,
         });
@@ -3598,13 +3692,34 @@ window.RESULT_IMAGES = {
       ctx.drawImage(softEdge, 0, 0);
 
       ctx.globalCompositeOperation = "destination-out";
+      if (BRUSH_TRAIL_BLEND_BLUR_PX > 0) {
+        ctx.filter = `blur(${BRUSH_TRAIL_BLEND_BLUR_PX}px)`;
+      }
       ctx.drawImage(swept, 0, 0);
+      ctx.filter = "none";
 
-      // The rest of the piece (outside the brushed area) dissolves by the end.
-      if (t > BRUSH_FADE_START) {
-        const f = smoothstep((t - BRUSH_FADE_START) / (1 - BRUSH_FADE_START));
-        ctx.fillStyle = `rgba(0,0,0,${f.toFixed(3)})`;
-        ctx.fillRect(0, 0, width, height);
+      const endP = endDissolveProgress(t);
+      if (endP > 0) {
+        if (!dissolve && !dissolveFailed) {
+          dissolve = prepareDissolveField(bbox, width, height);
+          if (dissolve === null && dissolveImage.complete) {
+            dissolveFailed = true;
+          }
+        }
+        if (dissolve) {
+          try {
+            drawDissolveHole(ctx, dissolve, endP);
+          } catch (err) {
+            console.warn("Dissolve draw failed:", err);
+            dissolveFailed = true;
+            dissolve = null;
+            ctx.fillStyle = `rgba(0,0,0,${endP.toFixed(3)})`;
+            ctx.fillRect(0, 0, width, height);
+          }
+        } else {
+          ctx.fillStyle = `rgba(0,0,0,${endP.toFixed(3)})`;
+          ctx.fillRect(0, 0, width, height);
+        }
       }
       ctx.globalCompositeOperation = "source-over";
 
@@ -3681,8 +3796,8 @@ window.RESULT_IMAGES = {
           vfxLayer,
           (area.minX + area.maxX) / 2,
           (area.minY + area.maxY) / 2,
-          7,
-          Math.min(area.width, area.height) * 0.35
+          12,
+          Math.min(area.width, area.height) * 0.42
         );
         playSpongeSparkles(bbox);
         cleanup();
@@ -3866,7 +3981,7 @@ window.RESULT_IMAGES = {
       const bbox = polygonBBox(poly);
       const ox = tapAt ? tapAt.x : (bbox.minX + bbox.maxX) / 2;
       const oy = tapAt ? tapAt.y : (bbox.minY + bbox.maxY) / 2;
-      burstDustPuffs(vfxLayer, ox, oy, 4, 18);
+      burstDustPuffs(vfxLayer, ox, oy, 7, 24);
     }
 
     startBrushWipe(cellId, () => {
