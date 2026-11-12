@@ -1946,7 +1946,9 @@ window.RESULT_IMAGES = {
   const BRUSH_SWEEP_END = 0.86; // side-to-side sweeping inside the local area
   /** Final mask dissolve: last ~40% of WIPE_MS (44% longer than the original 28% tail). */
   const BRUSH_FADE_START = 1 - 0.28 * 1.2 * 1.2;
-  const DISSOLVE_FEATHER = 32;
+  const DISSOLVE_SOFTEN = 0.2;
+  const DISSOLVE_FEATHER = Math.round(32 * (1 + DISSOLVE_SOFTEN));
+  const DISSOLVE_TEXTURE_BLUR_PX = Math.max(1, Math.round(DISSOLVE_FEATHER * DISSOLVE_SOFTEN));
   /** Brush width while cleaning (it grows to this from the icon size). */
   const BRUSH_SIZE_PX = 90;
   /** Radius of the cleaned trail — 30% smaller than the first brush version. */
@@ -2063,7 +2065,7 @@ window.RESULT_IMAGES = {
 
   const CELEBRATE_MS = 2400;
   /** Keeps numbers off the picture border. */
-  const EDGE_PAD_PX = 28;
+  const EDGE_PAD_PX = 48;
   /** Clearance kept under the Header.png artwork. */
   const HEADER_CLEARANCE_PX = 16;
   /** Cells bleed this far past the stage so the dirty layer covers every edge. */
@@ -3419,7 +3421,9 @@ window.RESULT_IMAGES = {
       sample.width = w;
       sample.height = h;
       const sctx = sample.getContext("2d", { willReadFrequently: true });
+      sctx.filter = DISSOLVE_TEXTURE_BLUR_PX > 0 ? `blur(${DISSOLVE_TEXTURE_BLUR_PX}px)` : "none";
       sctx.drawImage(dissolveImage, 0, 0, w, h);
+      sctx.filter = "none";
       const img = sctx.getImageData(0, 0, w, h);
       const lum = new Uint8Array(w * h);
       for (let i = 0, p = 0; i < img.data.length; i += 4, p++) {
