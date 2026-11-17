@@ -782,6 +782,37 @@ body {
   animation: cell-hint-pulse 0.75s cubic-bezier(0.45, 0, 0.55, 1) 2;
 }
 
+/* After splash broom: peaks hidden until the sweep finishes, then bounce in. */
+.icons-layer.is-awaiting-intro .cell-icon {
+  opacity: 0;
+  pointer-events: none;
+  scale: 0.35;
+}
+
+.icons-layer.is-peak-intro .cell-icon {
+  animation: peak-intro-bounce 0.62s cubic-bezier(0.34, 1.45, 0.64, 1) both;
+  animation-delay: calc(var(--peak-idx, 0) * 52ms);
+  pointer-events: auto;
+}
+
+@keyframes peak-intro-bounce {
+  0% {
+    opacity: 0;
+    scale: 0.35;
+  }
+  55% {
+    opacity: 1;
+    scale: 1.14;
+  }
+  78% {
+    scale: 0.94;
+  }
+  100% {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
 @keyframes cell-hint-pulse {
   0%,
   100% {
@@ -2057,7 +2088,7 @@ window.RESULT_IMAGES = {
   "use strict";
 
   /** Wall-clock length of one brush clean (pick-up + sweeping + lift-off). */
-  const WIPE_MS = 450;
+  const WIPE_MS = 540;
   /** Timeline, as parts of WIPE_MS. */
   const BRUSH_PICKUP_END = 0.08; // icon brush grows in place, right where it stood
   const BRUSH_SWEEP_END = 0.86; // side-to-side sweeping inside the local area
