@@ -2094,26 +2094,16 @@ window.RESULT_IMAGES = {
     );
   }
 
+  /** One wipe profile for desktop web and phone (crop canvas + dissolve.png finish). */
   function brushWipeTuning() {
-    if (!isCoarsePointerDevice()) {
-      return {
-        renderScale: 1,
-        stampStepMul: 0.3,
-        trailBlur: BRUSH_TRAIL_BLEND_BLUR_PX,
-        dissolveStep: 0.03,
-        puffGap: 28,
-        puffCountMul: 1,
-        simpleDissolve: false,
-      };
-    }
-  // Full-res crop buffer; same dissolve texture as desktop after the brush sweep.
+    const coarse = isCoarsePointerDevice();
     return {
       renderScale: 1,
       stampStepMul: 0.3,
       trailBlur: BRUSH_TRAIL_BLEND_BLUR_PX,
       dissolveStep: 0.04,
-      puffGap: 48,
-      puffCountMul: 0,
+      puffGap: coarse ? 48 : 28,
+      puffCountMul: coarse ? 0 : 1,
       simpleDissolve: false,
     };
   }
@@ -3431,8 +3421,7 @@ window.RESULT_IMAGES = {
     );
     const path = new Path2D(outline);
 
-    const edgeBlur =
-      EDGE_FADE * rs * (rs === 1 && isCoarsePointerDevice() ? 1.4 : 1);
+    const edgeBlur = EDGE_FADE * rs * (rs === 1 ? 1.35 : 1);
     sctx.filter = edgeBlur > 0.35 ? `blur(${edgeBlur}px)` : "none";
     sctx.fillStyle = "#fff";
     sctx.fill(path);
@@ -3824,10 +3813,7 @@ window.RESULT_IMAGES = {
     const softEdgeFull = buildSoftCellMask(width, height, polygon);
     const softEdge = buildSoftCellMask(cropW, cropH, localPoly, iw, ih);
 
-    const canvasOpts = {
-      alpha: true,
-      desynchronized: !isCoarsePointerDevice(),
-    };
+    const canvasOpts = { alpha: true, desynchronized: false };
     const canvas = document.createElement("canvas");
     canvas.width = iw;
     canvas.height = ih;
