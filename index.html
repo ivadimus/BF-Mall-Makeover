@@ -4936,14 +4936,8 @@ window.RESULT_IMAGES = {
   const SWEEP_RADIUS = 175;
   const SWEEP_BROOM_W = 210;
 
-  const sweepBroom = new Image();
-  sweepBroom.decoding = "async";
-  sweepBroom.onerror = () => {
-    sweepBroom.onerror = null;
-    if (brushImage && brushImage.src) sweepBroom.src = brushImage.src;
-  };
-  sweepBroom.src = "assets/brush-dust.webp";
-  const SWEEP_BROOM_TIP = { x: 0.57, y: 0.9 };
+  /** Same SKU brush icon as on the peaks (assets/SKU.webp). */
+  const SWEEP_BROOM_TIP = BRUSH_TIP;
 
   function playSplashSweep(onDone) {
     const width = layoutWidth || getStageSize().width;
@@ -5072,14 +5066,20 @@ window.RESULT_IMAGES = {
         fctx.fillStyle = g;
         fctx.fillRect(p.x - r, p.y - r, r * 2, r * 2);
       }
-      if (swept && sweepBroom.complete && sweepBroom.naturalWidth > 0) {
+      if (swept && brushImage.complete && brushImage.naturalWidth > 0) {
         const bw = SWEEP_BROOM_W;
-        const bh = (bw * sweepBroom.naturalHeight) / sweepBroom.naturalWidth;
+        const bh = (bw * brushImage.naturalHeight) / brushImage.naturalWidth;
         fctx.save();
         fctx.translate(pos.x, pos.y + 40);
         fctx.scale(pos.dir, 1);
         fctx.rotate(-0.1 + Math.sin(pos.u * Math.PI * 6) * 0.06);
-        fctx.drawImage(sweepBroom, -bw * SWEEP_BROOM_TIP.x, -bh * SWEEP_BROOM_TIP.y, bw, bh);
+        fctx.drawImage(
+          brushImage,
+          -bw * SWEEP_BROOM_TIP.x,
+          -bh * SWEEP_BROOM_TIP.y,
+          bw,
+          bh
+        );
         fctx.restore();
       }
 
