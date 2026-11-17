@@ -5119,6 +5119,9 @@ window.RESULT_IMAGES = {
   const SWEEP_PASS_MS = 560;
   const SWEEP_RADIUS = 175;
   const SWEEP_BROOM_W = 210;
+  /** After the last pass the broom lifts off before peaks appear. */
+  const SPLASH_BROOM_EXIT_MS = 480;
+  const PEAK_INTRO_DELAY_MS = 500;
 
   /** Same SKU brush icon as on the peaks (assets/SKU.webp). */
   const SWEEP_BROOM_TIP = BRUSH_TIP;
@@ -5221,10 +5224,13 @@ window.RESULT_IMAGES = {
       const dt = Math.min(0.034, (now - last) / 1000);
       last = now;
       const t = Math.max(0, now - t0);
-      const swept = t < totalMs;
+      const inSweep = t < totalMs;
+      const inBroomExit =
+        t >= totalMs && t < totalMs + SPLASH_BROOM_EXIT_MS;
+      const broomGone = t >= totalMs + SPLASH_BROOM_EXIT_MS;
       const pos = broomAt(Math.min(t, totalMs - 1));
 
-      if (swept) {
+      if (inSweep) {
         const cx = pos.x - pos.dir * 55;
         const cy = pos.y;
         pctx.globalCompositeOperation = "destination-out";
@@ -5265,13 +5271,39 @@ window.RESULT_IMAGES = {
         fctx.fillStyle = g;
         fctx.fillRect(p.x - r, p.y - r, r * 2, r * 2);
       }
-      if (swept && brushImage.complete && brushImage.naturalWidth > 0) {
+
+      if (
+        (inSweep || inBroomExit) &&
+        brushImage.complete &&
+        brushImage.naturalWidth > 0
+      ) {
         const bw = SWEEP_BROOM_W;
         const bh = (bw * brushImage.naturalHeight) / brushImage.naturalWidth;
+        const lastPass = broomAt(totalMs - 1);
+        let bx;
+        let by;
+        let dir;
+        let tilt;
+        let alpha = 1;
+        if (inSweep) {
+          bx = pos.x;
+          by = pos.y + 40;
+          dir = pos.dir;
+          tilt = -0.1 + Math.sin(pos.u * Math.PI * 6) * 0.06;
+        } else {
+          const eu = (t - totalMs) / SPLASH_BROOM_EXIT_MS;
+          const ease = smoothstep(eu);
+          bx = lastPass.x + lastPass.dir * (24 + ease * 72);
+          by = lastPass.y + 40 - ease * 95;
+          dir = lastPass.dir;
+          tilt = -0.1 - ease * 0.35;
+          alpha = 1 - ease;
+        }
         fctx.save();
-        fctx.translate(pos.x, pos.y + 40);
-        fctx.scale(pos.dir, 1);
-        fctx.rotate(-0.1 + Math.sin(pos.u * Math.PI * 6) * 0.06);
+        fctx.globalAlpha = alpha;
+        fctx.translate(bx, by);
+        fctx.scale(dir, 1);
+        fctx.rotate(tilt);
         fctx.drawImage(
           brushImage,
           -bw * SWEEP_BROOM_TIP.x,
@@ -5282,7 +5314,7 @@ window.RESULT_IMAGES = {
         fctx.restore();
       }
 
-      if (!swept && !puffs.length) {
+      if (broomGone && !puffs.length) {
         finish();
         return;
       }
@@ -5301,7 +5333,10 @@ window.RESULT_IMAGES = {
     }
 
     requestAnimationFrame(frame);
-    window.setTimeout(finish, totalMs + 2500);
+    window.setTimeout(
+      finish,
+      totalMs + SPLASH_BROOM_EXIT_MS + 2800
+    );
   }
 
   function init() {
@@ -5317,8 +5352,8 @@ window.RESULT_IMAGES = {
       splash.style.pointerEvents = "none";
       playSplashSweep(() => {
         firstSceneIntroPending = false;
-        playPeakIntro();
         transitionBusy = false;
+        window.setTimeout(playPeakIntro, PEAK_INTRO_DELAY_MS);
       });
     });
     replayButton.addEventListener("click", (event) => {
