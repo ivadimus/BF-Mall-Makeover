@@ -2262,6 +2262,8 @@ window.RESULT_IMAGES = {
   let rewardOpen = false;
   let replayOpen = false;
   let splashOpen = true;
+  /** First session: broom sweep on splash, then peaks bounce in. */
+  let firstSceneIntroPending = true;
   const cellPolygons = new Map();
   /** Where each piece's number sits — the sponge starts scrubbing right there. */
   const cellIconSpots = new Map();
@@ -3383,8 +3385,13 @@ window.RESULT_IMAGES = {
     // Dust/dirt overlay disabled.
     // ensureDustLayer(width, height);
 
-    // A fresh set of pieces: start counting idle time.
-    resetHintTimer();
+    if (firstSceneIntroPending) {
+      iconsLayer.classList.add("is-awaiting-intro");
+      iconsLayer.classList.remove("is-peak-intro");
+    } else {
+      iconsLayer.classList.remove("is-awaiting-intro", "is-peak-intro");
+      resetHintTimer();
+    }
   }
 
   /** Map Voronoi piece areas to integer costs — larger piece → higher cost. */
@@ -5116,6 +5123,21 @@ window.RESULT_IMAGES = {
   /** Same SKU brush icon as on the peaks (assets/SKU.webp). */
   const SWEEP_BROOM_TIP = BRUSH_TIP;
 
+  function playPeakIntro() {
+    const icons = iconsLayer.querySelectorAll(".cell-icon");
+    icons.forEach((el, i) => {
+      el.style.setProperty("--peak-idx", String(i));
+    });
+    iconsLayer.classList.remove("is-awaiting-intro");
+    iconsLayer.classList.add("is-peak-intro");
+    const ms =
+      620 + Math.max(0, icons.length - 1) * 52 + 80;
+    window.setTimeout(() => {
+      iconsLayer.classList.remove("is-peak-intro");
+      resetHintTimer();
+    }, ms);
+  }
+
   function playSplashSweep(onDone) {
     const width = layoutWidth || getStageSize().width;
     const height = layoutHeight || getStageSize().height;
@@ -5294,7 +5316,8 @@ window.RESULT_IMAGES = {
       transitionBusy = true;
       splash.style.pointerEvents = "none";
       playSplashSweep(() => {
-        resetHintTimer();
+        firstSceneIntroPending = false;
+        playPeakIntro();
         transitionBusy = false;
       });
     });
