@@ -587,15 +587,21 @@ body {
   display: none !important;
 }
 
-/* wipe7 liquid-splash matte drawn over the piece while it clears. */
+/* Piece-sized wipe matte (not full stage — keeps neighbour SVG soft edges on iOS). */
 .brush-wipe-canvas {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  left: 0;
+  top: 0;
+  width: auto;
+  height: auto;
   pointer-events: none;
   display: block;
   z-index: 7;
+  contain: paint;
+}
+
+.voronoi-layer.is-brush-wiping {
+  transform: translateZ(0);
 }
 
 .sponge-sparkles {
@@ -2100,11 +2106,11 @@ window.RESULT_IMAGES = {
         simpleDissolve: false,
       };
     }
-  // Slightly lower-res wipe buffers; keep soft trail + feather dissolve (no dissolve.png on iOS).
+  // Full-res crop buffer + light dissolve (no dissolve.png on iOS).
     return {
-      renderScale: 0.78,
-      stampStepMul: 0.28,
-      trailBlur: 4,
+      renderScale: 1,
+      stampStepMul: 0.3,
+      trailBlur: BRUSH_TRAIL_BLEND_BLUR_PX,
       dissolveStep: 0.05,
       puffGap: 48,
       puffCountMul: 0,
@@ -3723,7 +3729,9 @@ window.RESULT_IMAGES = {
     return smoothstep((t - BRUSH_FADE_START) / (1 - BRUSH_FADE_START));
   }
 
-  function drawDissolveHole(ctx, field, progress) {
+  function drawDissolveHole(ctx, field, progress, offX, offY) {
+    const ox = offX || 0;
+    const oy = offY || 0;
     const cutoff = Math.min(1, Math.max(0, progress)) * 256;
     const feather = Math.max(8, DISSOLVE_FEATHER);
     const px = field.holeData.data;
@@ -3739,7 +3747,7 @@ window.RESULT_IMAGES = {
       px[o + 3] = alpha;
     }
     field.holeCtx.putImageData(field.holeData, 0, 0);
-    ctx.drawImage(field.hole, field.x, field.y);
+    ctx.drawImage(field.hole, field.x - ox, field.y - oy);
   }
 
   /**
@@ -3782,22 +3790,59 @@ window.RESULT_IMAGES = {
     const width = layoutWidth;
     const height = layoutHeight;
     const tune = brushWipeTuning();
-    const rs = tune.renderScale || 1;
-    const iw = Math.max(1, Math.round(width * rs));
-    const ih = Math.max(1, Math.round(height * rs));
-    const softEdgeFull = buildSoftCellMask(width, height, polygon);
-    const softEdge = buildSoftCellMask(width, height, polygon, iw, ih);
     const bbox = polygonBBox(polygon);
     const centre = cellIconSpots.get(cellId) || null;
     const area = localBrushArea(polygon, bbox, centre);
 
-    const canvasOpts = { alpha: true, desynchronized: true };
+    const wipePad = Math.ceil(FEATHER * 2.5 + EDGE_FADE);
+    const cropX = Math.max(0, Math.floor(bbox.minX - wipePad));
+    const cropY = Math.max(0, Math.floor(bbox.minY - wipePad));
+    const cropW = Math.max(
+      1,
+      Math.min(width, Math.ceil(bbox.maxX + wipePad)) - cropX
+    );
+    const cropH = Math.max(
+      1,
+      Math.min(height, Math.ceil(bbox.maxY + wipePad)) - cropY
+    );
+    const localPoly = polygon.map((p) => ({
+      x: p.x - cropX,
+      y: p.y - cropY,
+    }));
+    const localBBox = {
+      minX: bbox.minX - cropX,
+      minY: bbox.minY - cropY,
+      maxX: bbox.maxX - cropX,
+      maxY: bbox.maxY - cropY,
+      width: bbox.width,
+      height: bbox.height,
+    };
+
+    const rs = tune.renderScale || 1;
+    const iw = Math.max(1, Math.round(cropW * rs));
+    const ih = Math.max(1, Math.round(cropH * rs));
+    const softEdgeFull = buildSoftCellMask(width, height, polygon);
+    const softEdge = buildSoftCellMask(cropW, cropH, localPoly, iw, ih);
+
+    const canvasOpts = {
+      alpha: true,
+      desynchronized: !isCoarsePointerDevice(),
+    };
     const canvas = document.createElement("canvas");
     canvas.width = iw;
     canvas.height = ih;
     canvas.className = "brush-wipe-canvas";
+    canvas.style.left = `${cropX}px`;
+    canvas.style.top = `${cropY}px`;
+    canvas.style.width = `${cropW}px`;
+    canvas.style.height = `${cropH}px`;
     vfxLayer.appendChild(canvas);
+    svgLayer.classList.add("is-brush-wiping");
     const ctx = canvas.getContext("2d", canvasOpts);
+    if (ctx) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+    }
 
     function withLayoutScale(c, fn) {
       c.save();
@@ -3819,7 +3864,7 @@ window.RESULT_IMAGES = {
     pieceBase.height = ih;
     const pieceBaseCtx = pieceBase.getContext("2d", canvasOpts);
     withLayoutScale(pieceBaseCtx, () => {
-      drawImageCover(pieceBaseCtx, stateAImage, 0, 0, width, height);
+      drawImageCover(pieceBaseCtx, stateAImage, -cropX, -cropY, width, height);
     });
     pieceBaseCtx.setTransform(1, 0, 0, 1, 0, 0);
     pieceBaseCtx.globalCompositeOperation = "destination-in";
@@ -3959,6 +4004,7 @@ window.RESULT_IMAGES = {
       if (finished) return;
       finished = true;
       cancelAnimationFrame(rafId);
+      svgLayer.classList.remove("is-brush-wiping");
       canvas.remove();
       fxLayer.remove();
       commitDustHole(softEdgeFull);
@@ -3983,7 +4029,13 @@ window.RESULT_IMAGES = {
             fromS + (toS - fromS) * (i / steps),
             plan
           );
-          sweptCtx.drawImage(stamp, p.x - stampW / 2, p.y - stampH / 2, stampW, stampH);
+          sweptCtx.drawImage(
+            stamp,
+            p.x - cropX - stampW / 2,
+            p.y - cropY - stampH / 2,
+            stampW,
+            stampH
+          );
         }
       });
       sweptBlurStale = true;
@@ -4047,10 +4099,10 @@ window.RESULT_IMAGES = {
             ctx.globalCompositeOperation = "destination-out";
             ctx.fillStyle = `rgba(0,0,0,${endP.toFixed(3)})`;
             ctx.fillRect(
-              bbox.minX - FEATHER,
-              bbox.minY - FEATHER,
-              bbox.width + FEATHER * 2,
-              bbox.height + FEATHER * 2
+              localBBox.minX - FEATHER,
+              localBBox.minY - FEATHER,
+              localBBox.width + FEATHER * 2,
+              localBBox.height + FEATHER * 2
             );
           });
           clipToSoftMask(ctx, "destination-in");
@@ -4073,7 +4125,7 @@ window.RESULT_IMAGES = {
               dctx.clearRect(0, 0, iw, ih);
               withLayoutScale(dctx, () => {
                 dctx.globalCompositeOperation = "destination-out";
-                drawDissolveHole(dctx, dissolve, endP);
+                drawDissolveHole(dctx, dissolve, endP, cropX, cropY);
               });
               dissolveBlitP = endP;
             }
@@ -4087,14 +4139,14 @@ window.RESULT_IMAGES = {
             withLayoutScale(ctx, () => {
               ctx.globalCompositeOperation = "destination-out";
               ctx.fillStyle = `rgba(0,0,0,${endP.toFixed(3)})`;
-              ctx.fillRect(0, 0, width, height);
+              ctx.fillRect(0, 0, cropW, cropH);
             });
           }
         } else if (!tune.simpleDissolve && !dissolve) {
           withLayoutScale(ctx, () => {
             ctx.globalCompositeOperation = "destination-out";
             ctx.fillStyle = `rgba(0,0,0,${endP.toFixed(3)})`;
-            ctx.fillRect(0, 0, width, height);
+            ctx.fillRect(0, 0, cropW, cropH);
           });
         }
       }
@@ -4156,7 +4208,7 @@ window.RESULT_IMAGES = {
       ].join(" ");
       brushEl.style.opacity = alpha.toFixed(3);
 
-      if (!svgHidden) {
+      if (!svgHidden && t >= BRUSH_PICKUP_END) {
         cellEl.classList.add("is-gone");
         svgHidden = true;
       }
