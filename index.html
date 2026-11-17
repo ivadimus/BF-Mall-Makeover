@@ -2106,15 +2106,15 @@ window.RESULT_IMAGES = {
         simpleDissolve: false,
       };
     }
-  // Full-res crop buffer + light dissolve (no dissolve.png on iOS).
+  // Full-res crop buffer; same dissolve texture as desktop after the brush sweep.
     return {
       renderScale: 1,
       stampStepMul: 0.3,
       trailBlur: BRUSH_TRAIL_BLEND_BLUR_PX,
-      dissolveStep: 0.05,
+      dissolveStep: 0.04,
       puffGap: 48,
       puffCountMul: 0,
-      simpleDissolve: true,
+      simpleDissolve: false,
     };
   }
 
