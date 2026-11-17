@@ -2094,14 +2094,16 @@ window.RESULT_IMAGES = {
     );
   }
 
-  /** One wipe profile for desktop web and phone (crop canvas + dissolve.png finish). */
+  /** One wipe profile; phone skips canvas filter blur and caps dissolve CPU. */
   function brushWipeTuning() {
     const coarse = isCoarsePointerDevice();
     return {
-      renderScale: 1,
+      renderScale: coarse ? 0.9 : 1,
       stampStepMul: 0.3,
-      trailBlur: BRUSH_TRAIL_BLEND_BLUR_PX,
-      dissolveStep: 0.04,
+      trailBlur: coarse ? 0 : BRUSH_TRAIL_BLEND_BLUR_PX,
+      dissolveStep: coarse ? 0.08 : 0.04,
+      dissolveSampleMax: coarse ? 200 : null,
+      maxStampStepsPerFrame: coarse ? 12 : 0,
       puffGap: coarse ? 48 : 28,
       puffCountMul: coarse ? 0 : 1,
       simpleDissolve: false,
@@ -3682,31 +3684,43 @@ window.RESULT_IMAGES = {
     return c * c * (3 - 2 * c);
   }
 
-  function prepareDissolveField(bbox, width, height) {
+  function prepareDissolveField(bbox, width, height, sampleMax) {
     if (!dissolveImage.complete || dissolveImage.naturalWidth === 0) return null;
     try {
       const x = Math.max(0, Math.floor(bbox.minX) - 2);
       const y = Math.max(0, Math.floor(bbox.minY) - 2);
       const w = Math.max(1, Math.min(width - x, Math.ceil(bbox.maxX) - x + 4));
       const h = Math.max(1, Math.min(height - y, Math.ceil(bbox.maxY) - y + 4));
+      let sw = w;
+      let sh = h;
+      const cap = sampleMax && sampleMax > 0 ? sampleMax : 0;
+      if (cap && Math.max(w, h) > cap) {
+        const sc = cap / Math.max(w, h);
+        sw = Math.max(1, Math.round(w * sc));
+        sh = Math.max(1, Math.round(h * sc));
+      }
       const sample = document.createElement("canvas");
-      sample.width = w;
-      sample.height = h;
+      sample.width = sw;
+      sample.height = sh;
       const sctx = sample.getContext("2d", { willReadFrequently: true });
-      sctx.filter = DISSOLVE_TEXTURE_BLUR_PX > 0 ? `blur(${DISSOLVE_TEXTURE_BLUR_PX}px)` : "none";
-      sctx.drawImage(dissolveImage, 0, 0, w, h);
+      const blurPx =
+        cap && sw < w
+          ? Math.max(1, Math.round(DISSOLVE_TEXTURE_BLUR_PX * (sw / w)))
+          : DISSOLVE_TEXTURE_BLUR_PX;
+      sctx.filter = blurPx > 0 ? `blur(${blurPx}px)` : "none";
+      sctx.drawImage(dissolveImage, 0, 0, sw, sh);
       sctx.filter = "none";
-      const img = sctx.getImageData(0, 0, w, h);
-      const lum = new Uint8Array(w * h);
+      const img = sctx.getImageData(0, 0, sw, sh);
+      const lum = new Uint8Array(sw * sh);
       for (let i = 0, p = 0; i < img.data.length; i += 4, p++) {
         lum[p] = img.data[i];
       }
       const hole = document.createElement("canvas");
-      hole.width = w;
-      hole.height = h;
+      hole.width = sw;
+      hole.height = sh;
       const holeCtx = hole.getContext("2d");
-      const holeData = holeCtx.createImageData(w, h);
-      return { x, y, w, h, lum, hole, holeCtx, holeData };
+      const holeData = holeCtx.createImageData(sw, sh);
+      return { x, y, w, h, sw, sh, lum, hole, holeCtx, holeData };
     } catch (err) {
       console.warn("Dissolve mask unavailable:", err);
       return null;
@@ -3736,7 +3750,13 @@ window.RESULT_IMAGES = {
       px[o + 3] = alpha;
     }
     field.holeCtx.putImageData(field.holeData, 0, 0);
-    ctx.drawImage(field.hole, field.x - ox, field.y - oy);
+    const dx = field.x - ox;
+    const dy = field.y - oy;
+    if (field.sw < field.w || field.sh < field.h) {
+      ctx.drawImage(field.hole, dx, dy, field.w, field.h);
+    } else {
+      ctx.drawImage(field.hole, dx, dy);
+    }
   }
 
   /**
@@ -3811,7 +3831,15 @@ window.RESULT_IMAGES = {
     const iw = Math.max(1, Math.round(cropW * rs));
     const ih = Math.max(1, Math.round(cropH * rs));
     const softEdgeFull = buildSoftCellMask(width, height, polygon);
-    const softEdge = buildSoftCellMask(cropW, cropH, localPoly, iw, ih);
+    const softEdge = document.createElement("canvas");
+    softEdge.width = iw;
+    softEdge.height = ih;
+    const softEdgeCtx = softEdge.getContext("2d");
+    if (softEdgeCtx) {
+      softEdgeCtx.imageSmoothingEnabled = true;
+      softEdgeCtx.imageSmoothingQuality = "high";
+      softEdgeCtx.drawImage(softEdgeFull, cropX, cropY, cropW, cropH, 0, 0, iw, ih);
+    }
 
     const canvasOpts = { alpha: true, desynchronized: false };
     const canvas = document.createElement("canvas");
@@ -3953,6 +3981,16 @@ window.RESULT_IMAGES = {
     const sweptCtx = swept.getContext("2d", canvasOpts);
     let dissolve = null;
     let dissolveFailed = false;
+  if (dissolveImage.complete && dissolveImage.naturalWidth > 0) {
+      dissolve = prepareDissolveField(
+        bbox,
+        width,
+        height,
+        tune.dissolveSampleMax
+      );
+      if (!dissolve) dissolveFailed = true;
+    }
+    const dissolveBlitCtx = dissolveBlit.getContext("2d", canvasOpts);
 
     const stampRadius = BRUSH_TRAIL_RADIUS_PX;
     const stamp = buildSpongeStamp(stampRadius);
@@ -4002,10 +4040,12 @@ window.RESULT_IMAGES = {
       const a = brushPathPoint(polygon, area, fromS, plan);
       const b = brushPathPoint(polygon, area, toS, plan);
       if (toS <= fromS) return b;
-      const steps = Math.max(
+      let steps = Math.max(
         1,
         Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / stampStep)
       );
+      const stepCap = tune.maxStampStepsPerFrame;
+      if (stepCap > 0) steps = Math.min(steps, stepCap);
       withLayoutScale(sweptCtx, () => {
         sweptCtx.globalCompositeOperation = "source-over";
         for (let i = 1; i <= steps; i++) {
@@ -4093,7 +4133,12 @@ window.RESULT_IMAGES = {
           });
           clipToSoftMask(ctx, "destination-in");
         } else if (!dissolve && !dissolveFailed) {
-          dissolve = prepareDissolveField(bbox, width, height);
+          dissolve = prepareDissolveField(
+            bbox,
+            width,
+            height,
+            tune.dissolveSampleMax
+          );
           if (dissolve === null && dissolveImage.complete) {
             dissolveFailed = true;
           }
@@ -4106,13 +4151,14 @@ window.RESULT_IMAGES = {
               endP >= 1 ||
               endP - dissolveBlitP >= dissolveStep
             ) {
-              const dctx = dissolveBlit.getContext("2d", canvasOpts);
-              dctx.setTransform(1, 0, 0, 1, 0, 0);
-              dctx.clearRect(0, 0, iw, ih);
-              withLayoutScale(dctx, () => {
-                dctx.globalCompositeOperation = "destination-out";
-                drawDissolveHole(dctx, dissolve, endP, cropX, cropY);
-              });
+              if (dissolveBlitCtx) {
+                dissolveBlitCtx.setTransform(1, 0, 0, 1, 0, 0);
+                dissolveBlitCtx.clearRect(0, 0, iw, ih);
+                withLayoutScale(dissolveBlitCtx, () => {
+                  dissolveBlitCtx.globalCompositeOperation = "destination-out";
+                  drawDissolveHole(dissolveBlitCtx, dissolve, endP, cropX, cropY);
+                });
+              }
               dissolveBlitP = endP;
             }
             ctx.globalCompositeOperation = "destination-out";
@@ -4194,7 +4240,7 @@ window.RESULT_IMAGES = {
       ].join(" ");
       brushEl.style.opacity = alpha.toFixed(3);
 
-      if (!svgHidden && t >= BRUSH_PICKUP_END) {
+      if (!svgHidden && (t >= BRUSH_PICKUP_END || isCoarsePointerDevice())) {
         cellEl.classList.add("is-gone");
         svgHidden = true;
       }
