@@ -1649,7 +1649,7 @@ body {
   .rotate-hint-phone { animation: none; transform: rotate(-90deg); }
 }
 
-/* Desktop web demo: finger cursor (paletz) follows the mouse — 2× base size. */
+/* Desktop web demo: generic finger follows the mouse — 2× base size. */
 html:not(.is-bare) body {
   cursor: none;
 }
@@ -1691,7 +1691,7 @@ html:not(.is-bare) .web-tap-hand.is-pressed {
   <img
     class="web-tap-hand"
     id="web-tap-hand"
-    src="assets/paletz.png"
+    src="assets/generic-hand.svg"
     alt=""
     draggable="false"
     aria-hidden="true"
@@ -2444,7 +2444,7 @@ window.RESULT_IMAGES = {
   let scene0TutorialComplete = false;
   let scene0TutorialActive = false;
   let scene0TutorialCellId = null;
-  const TUTORIAL_HAND_URL = "assets/paletz.png";
+  const TUTORIAL_HAND_URL = "assets/generic-hand.svg";
   const cellPolygons = new Map();
   /** Where each piece's number sits — the sponge starts scrubbing right there. */
   const cellIconSpots = new Map();
