@@ -824,6 +824,14 @@ body {
 }
 
 /* First scene: hand points at one random peak until the player taps it. */
+.tutorial-hand-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 22;
+  pointer-events: none;
+  overflow: visible;
+}
+
 .tutorial-hand {
   position: absolute;
   width: 78px;
@@ -1666,6 +1674,7 @@ body {
             <svg class="voronoi-layer" id="voronoi-layer" aria-hidden="true"></svg>
             <div class="vfx-layer" id="vfx-layer" aria-hidden="true"></div>
             <div class="icons-layer" id="icons-layer"></div>
+            <div class="tutorial-hand-layer" id="tutorial-hand-layer" aria-hidden="true"></div>
             <div class="celebrate-layer" id="celebrate-layer" aria-hidden="true"></div>
           </div>
           <div class="hud-layer" id="hud-layer">
@@ -2225,20 +2234,29 @@ window.RESULT_IMAGES = {
     );
   }
 
-  /** One wipe profile; phone skips canvas filter blur and caps dissolve CPU. */
+  /** One wipe profile; phone trades resolution for steady frame rate. */
   function brushWipeTuning() {
     const coarse = isCoarsePointerDevice();
     return {
-      renderScale: coarse ? 0.9 : 1,
-      stampStepMul: 0.3,
+      renderScale: coarse ? 0.68 : 1,
+      stampStepMul: coarse ? 0.34 : 0.3,
       trailBlur: coarse ? 0 : BRUSH_TRAIL_BLEND_BLUR_PX,
-      dissolveStep: coarse ? 0.08 : 0.04,
-      dissolveSampleMax: coarse ? 200 : null,
-      maxStampStepsPerFrame: coarse ? 12 : 0,
+      dissolveStep: coarse ? 0.1 : 0.04,
+      dissolveSampleMax: coarse ? 128 : null,
+      maxStampStepsPerFrame: coarse ? 7 : 0,
+      frameMinMs: coarse ? 40 : 0,
       puffGap: coarse ? 48 : 28,
       puffCountMul: coarse ? 0 : 1,
-      simpleDissolve: false,
+      simpleDissolve: coarse,
     };
+  }
+
+  function splashCanvasScale(width, height) {
+    if (!isCoarsePointerDevice()) {
+      return Math.min(3, Math.max(1, stageScale() * (window.devicePixelRatio || 1)));
+    }
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    return Math.min(1.15, Math.max(0.85, stageScale() * dpr));
   }
 
   const FEATHER = 36;
@@ -2257,6 +2275,7 @@ window.RESULT_IMAGES = {
   const playArea = document.getElementById("play-area");
   const svgLayer = document.getElementById("voronoi-layer");
   const iconsLayer = document.getElementById("icons-layer");
+  const tutorialHandLayer = document.getElementById("tutorial-hand-layer");
   const vfxLayer = document.getElementById("vfx-layer");
   const celebrateLayer = document.getElementById("celebrate-layer");
   const rewardScreen = document.getElementById("reward-screen");
@@ -3550,10 +3569,11 @@ window.RESULT_IMAGES = {
    * @param {number} [outW] — output width (defaults to width); feather scales with outW/width
    * @param {number} [outH] — output height (defaults to height)
    */
-  function buildSoftCellMask(width, height, polygon, outW, outH) {
+  function buildSoftCellMask(width, height, polygon, outW, outH, opts) {
     const w = Math.max(1, Math.round(outW != null ? outW : width));
     const h = Math.max(1, Math.round(outH != null ? outH : height));
     const rs = w / width;
+    const fast = opts && opts.fast;
     const poly =
       rs === 1
         ? polygon
@@ -3571,7 +3591,8 @@ window.RESULT_IMAGES = {
     );
     const path = new Path2D(outline);
 
-    const edgeBlur = EDGE_FADE * rs * (rs === 1 ? 1.35 : 1);
+    let edgeBlur = EDGE_FADE * rs * (rs === 1 ? 1.35 : 1);
+    if (fast) edgeBlur = Math.min(edgeBlur, 11);
     sctx.filter = edgeBlur > 0.35 ? `blur(${edgeBlur}px)` : "none";
     sctx.fillStyle = "#fff";
     sctx.fill(path);
@@ -3978,15 +3999,30 @@ window.RESULT_IMAGES = {
     const rs = tune.renderScale || 1;
     const iw = Math.max(1, Math.round(cropW * rs));
     const ih = Math.max(1, Math.round(cropH * rs));
-    const softEdgeFull = buildSoftCellMask(width, height, polygon);
+    const coarse = isCoarsePointerDevice();
+    const softEdgeFull = coarse
+      ? null
+      : buildSoftCellMask(width, height, polygon);
     const softEdge = document.createElement("canvas");
     softEdge.width = iw;
     softEdge.height = ih;
     const softEdgeCtx = softEdge.getContext("2d");
     if (softEdgeCtx) {
       softEdgeCtx.imageSmoothingEnabled = true;
-      softEdgeCtx.imageSmoothingQuality = "high";
-      softEdgeCtx.drawImage(softEdgeFull, cropX, cropY, cropW, cropH, 0, 0, iw, ih);
+      if (!coarse) softEdgeCtx.imageSmoothingQuality = "high";
+      if (softEdgeFull) {
+        softEdgeCtx.drawImage(softEdgeFull, cropX, cropY, cropW, cropH, 0, 0, iw, ih);
+      } else {
+        const fastMask = buildSoftCellMask(
+          cropW,
+          cropH,
+          localPoly,
+          iw,
+          ih,
+          { fast: true }
+        );
+        softEdgeCtx.drawImage(fastMask, 0, 0);
+      }
     }
 
     const canvasOpts = { alpha: true, desynchronized: false };
@@ -4003,7 +4039,7 @@ window.RESULT_IMAGES = {
     const ctx = canvas.getContext("2d", canvasOpts);
     if (ctx) {
       ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = "high";
+      if (!coarse) ctx.imageSmoothingQuality = "high";
     }
 
     function withLayoutScale(c, fn) {
@@ -4146,6 +4182,7 @@ window.RESULT_IMAGES = {
     let prevS = 0;
     let lastPuffAt = 0;
     let tilt = 0;
+    let lastFrameAt = 0;
     const wipeClockStart = performance.now();
 
     function wipeProgress() {
@@ -4170,7 +4207,12 @@ window.RESULT_IMAGES = {
       svgLayer.classList.remove("is-brush-wiping");
       canvas.remove();
       fxLayer.remove();
-      commitDustHole(softEdgeFull);
+      commitDustHole(
+        softEdgeFull ||
+          buildSoftCellMask(width, height, polygon, undefined, undefined, {
+            fast: coarse,
+          })
+      );
       onDone();
     }
 
@@ -4387,6 +4429,13 @@ window.RESULT_IMAGES = {
 
     function tick() {
       if (finished) return;
+      const now = performance.now();
+      const minGap = tune.frameMinMs || 0;
+      if (minGap > 0 && now - lastFrameAt < minGap) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
+      lastFrameAt = now;
       renderFrame();
       if (wipeProgress() >= 1) {
         // Last of the dust puffs off as the piece finishes.
@@ -4510,8 +4559,7 @@ window.RESULT_IMAGES = {
   }
 
   function removeTutorialHand() {
-    const hand = document.getElementById("tutorial-hand");
-    if (hand) hand.remove();
+    if (tutorialHandLayer) tutorialHandLayer.innerHTML = "";
   }
 
   function clearScene0TutorialUi() {
@@ -4560,7 +4608,8 @@ window.RESULT_IMAGES = {
     const y = parseFloat(pick.style.top) || 0;
     hand.style.left = `${x + 34}px`;
     hand.style.top = `${y + 6}px`;
-    iconsLayer.appendChild(hand);
+    const layer = tutorialHandLayer || iconsLayer;
+    layer.appendChild(hand);
   }
 
   function stopHint() {
@@ -4653,7 +4702,7 @@ window.RESULT_IMAGES = {
       burstDustPuffs(vfxLayer, ox, oy, 7, 24);
     }
 
-    startBrushWipe(cellId, () => {
+    const afterWipe = () => {
       cellEl.classList.remove("is-wiping");
       cellEl.classList.add("is-gone");
       iconEl.classList.add("is-gone");
@@ -4661,7 +4710,13 @@ window.RESULT_IMAGES = {
       if (clearedCount >= pieceCount) {
         startSceneComplete();
       }
-    }, { startRect });
+    };
+    const runWipe = () => startBrushWipe(cellId, afterWipe, { startRect });
+    if (isCoarsePointerDevice()) {
+      requestAnimationFrame(() => requestAnimationFrame(runWipe));
+    } else {
+      runWipe();
+    }
   }
 
   function formatReward(n) {
@@ -5315,15 +5370,18 @@ window.RESULT_IMAGES = {
   function startSplashLogoSparkles() {
     stopSplashLogoSparkles();
     if (!splashOpen) return;
-    for (let i = 0; i < 7; i++) spawnSplashLogoSparkle();
+    const coarse = isCoarsePointerDevice();
+    const initial = coarse ? 3 : 7;
+    const gap = coarse ? 720 : 360;
+    for (let i = 0; i < initial; i++) spawnSplashLogoSparkle();
     splashSparkleTimer = window.setInterval(() => {
       if (!splashOpen) {
         stopSplashLogoSparkles();
         return;
       }
       spawnSplashLogoSparkle();
-      if (Math.random() < 0.5) spawnSplashLogoSparkle();
-    }, 360);
+      if (!coarse && Math.random() < 0.5) spawnSplashLogoSparkle();
+    }, gap);
   }
 
   /* ---------- Start screen: the broom sweeps the picture away ---------- */
@@ -5357,8 +5415,12 @@ window.RESULT_IMAGES = {
     });
     iconsLayer.classList.remove("is-awaiting-intro");
     iconsLayer.classList.add("is-peak-intro");
-    const ms =
-      620 + Math.max(0, icons.length - 1) * 52 + 80;
+    const coarse = isCoarsePointerDevice();
+    const step = coarse ? 28 : 52;
+    const ms = (coarse ? 380 : 620) + Math.max(0, icons.length - 1) * step + 60;
+    if (coarse) {
+      icons.forEach((el) => el.style.setProperty("--peak-idx", "0"));
+    }
     window.setTimeout(() => {
       iconsLayer.classList.remove("is-peak-intro");
       startScene0Tutorial();
@@ -5370,7 +5432,7 @@ window.RESULT_IMAGES = {
     syncPeaksIntroHidden();
     const width = layoutWidth || getStageSize().width;
     const height = layoutHeight || getStageSize().height;
-    const k = Math.min(3, Math.max(1, stageScale() * (window.devicePixelRatio || 1)));
+    const k = splashCanvasScale(width, height);
     const img = document.getElementById("splash-img");
     const rand = (a, b) => a + Math.random() * (b - a);
 
