@@ -5787,5 +5787,43 @@ window.RESULT_IMAGES = {
       document.addEventListener("pointerdown", goFullScreen, { once: true });
     })();
   </script>
+  <!-- Desktop web (phone chrome): finger follows the pointer instead of the OS cursor. -->
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var hand = document.getElementById("web-tap-hand");
+      if (!hand) return;
+
+      function webDemo() {
+        return !root.classList.contains("is-bare");
+      }
+
+      function onMove(e) {
+        if (!webDemo()) return;
+        hand.classList.add("is-active");
+        hand.style.left = e.clientX + "px";
+        hand.style.top = e.clientY + "px";
+      }
+
+      function onDown() {
+        if (!webDemo()) return;
+        hand.classList.add("is-pressed");
+      }
+
+      function onUp() {
+        hand.classList.remove("is-pressed");
+      }
+
+      function onLeave() {
+        hand.classList.remove("is-active", "is-pressed");
+      }
+
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerdown", onDown);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("blur", onLeave);
+      document.addEventListener("mouseleave", onLeave);
+    })();
+  </script>
 </body>
 </html>
