@@ -8,7 +8,11 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#000000" />
-  <title>Voronoi Reveal Prototype</title>
+  <meta name="apple-mobile-web-app-title" content="Makeover" />
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <title>Mall Makeover</title>
   <!-- All styles and scripts are inlined: this one file is the whole prototype (images stay in assets/). -->
   <style>
 *,
@@ -888,7 +892,7 @@ body {
   z-index: 1;
 }
 
-/* Result screens: one 60% dark layer that stays put while the picture on it changes.
+/* Result screens: one 80% dark layer that stays put while the picture on it changes.
    - after every scene: "Stage Completed!" picture
    - after the last scene: "The Makeover Completed!" picture, then the "Let's Go Again!" card. */
 .reward-screen {
@@ -910,7 +914,7 @@ body {
 }
 
 .reward-screen.is-visible {
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.8);
   opacity: 1;
   pointer-events: auto;
 }
