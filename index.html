@@ -823,6 +823,44 @@ body {
   }
 }
 
+/* First scene: hand points at one random peak until the player taps it. */
+.tutorial-hand {
+  position: absolute;
+  width: 78px;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+  z-index: 25;
+  transform: translate(-42%, -38%) scale(1);
+  transform-origin: 72% 88%;
+  animation: tutorial-hand-pulse 0.82s ease-in-out infinite;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.45));
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+@keyframes tutorial-hand-pulse {
+  0%,
+  100% {
+    transform: translate(-42%, -38%) scale(1);
+  }
+  50% {
+    transform: translate(-42%, -38%) scale(1.14);
+  }
+}
+
+.cell-icon.is-tutorial-locked {
+  opacity: 0.42;
+  pointer-events: none;
+  filter: saturate(0.55);
+}
+
+.cell-icon.is-tutorial-target {
+  z-index: 24;
+  pointer-events: auto;
+}
+
 @keyframes cell-hint-pulse {
   0%,
   100% {
@@ -2274,6 +2312,11 @@ window.RESULT_IMAGES = {
   let splashOpen = true;
   /** First session: broom sweep on splash, then peaks bounce in. */
   let firstSceneIntroPending = true;
+  /** Scene 1 only: one guided tap with the hand, then free play. */
+  let scene0TutorialComplete = false;
+  let scene0TutorialActive = false;
+  let scene0TutorialCellId = null;
+  const TUTORIAL_HAND_URL = "assets/paletz.png";
   const cellPolygons = new Map();
   /** Where each piece's number sits — the sponge starts scrubbing right there. */
   const cellIconSpots = new Map();
@@ -3288,6 +3331,10 @@ window.RESULT_IMAGES = {
     clearedCount = 0;
     stopCelebrationLights(true);
     setSamHappy(false);
+    if (sceneIndex !== 0 || gameIndex !== 0) {
+      clearScene0TutorialUi();
+      scene0TutorialActive = false;
+    }
     applySamShift();
     const budget = budgetForPieceCount(pieceCount);
     currency = budget;
@@ -4394,7 +4441,72 @@ window.RESULT_IMAGES = {
   let hintEndTimer = 0;
 
   function hintBlocked() {
-    return celebrating || rewardOpen || replayOpen || transitionBusy || splashOpen;
+    return (
+      celebrating ||
+      rewardOpen ||
+      replayOpen ||
+      transitionBusy ||
+      splashOpen ||
+      scene0TutorialActive
+    );
+  }
+
+  function shouldOfferScene0Tutorial() {
+    return sceneIndex === 0 && gameIndex === 0 && !scene0TutorialComplete;
+  }
+
+  function removeTutorialHand() {
+    const hand = document.getElementById("tutorial-hand");
+    if (hand) hand.remove();
+  }
+
+  function clearScene0TutorialUi() {
+    removeTutorialHand();
+    iconsLayer
+      .querySelectorAll(".cell-icon.is-tutorial-locked, .cell-icon.is-tutorial-target")
+      .forEach((el) => {
+        el.classList.remove("is-tutorial-locked", "is-tutorial-target");
+      });
+  }
+
+  function endScene0Tutorial() {
+    if (!scene0TutorialActive) return;
+    scene0TutorialActive = false;
+    scene0TutorialComplete = true;
+    scene0TutorialCellId = null;
+    clearScene0TutorialUi();
+    resetHintTimer();
+  }
+
+  function startScene0Tutorial() {
+    if (!shouldOfferScene0Tutorial() || scene0TutorialActive) return;
+    const icons = iconsLayer.querySelectorAll(
+      ".cell-icon:not(.is-gone):not(.is-fading):not(.is-cleaning)"
+    );
+    if (!icons.length) return;
+    stopHint();
+    const pick = icons[Math.floor(Math.random() * icons.length)];
+    scene0TutorialCellId = Number(pick.dataset.cellId);
+    scene0TutorialActive = true;
+    icons.forEach((el) => {
+      const id = Number(el.dataset.cellId);
+      if (id === scene0TutorialCellId) {
+        el.classList.add("is-tutorial-target");
+      } else {
+        el.classList.add("is-tutorial-locked");
+      }
+    });
+    const hand = document.createElement("img");
+    hand.id = "tutorial-hand";
+    hand.className = "tutorial-hand";
+    hand.src = TUTORIAL_HAND_URL;
+    hand.alt = "";
+    hand.draggable = false;
+    const x = parseFloat(pick.style.left) || 0;
+    const y = parseFloat(pick.style.top) || 0;
+    hand.style.left = `${x + 34}px`;
+    hand.style.top = `${y + 6}px`;
+    iconsLayer.appendChild(hand);
   }
 
   function stopHint() {
@@ -4425,8 +4537,6 @@ window.RESULT_IMAGES = {
   }
 
   function onIconTap(cellId, event) {
-    // The player is playing: stop the hint and start counting idle time again.
-    resetHintTimer();
     const cellEl = svgLayer.querySelector(`.cell[data-cell-id="${cellId}"]`);
     const iconEl = iconsLayer.querySelector(`.cell-icon[data-cell-id="${cellId}"]`);
 
@@ -4437,6 +4547,14 @@ window.RESULT_IMAGES = {
     ) {
       return;
     }
+
+    if (scene0TutorialActive) {
+      if (cellId !== scene0TutorialCellId) return;
+      endScene0Tutorial();
+    }
+
+    // The player is playing: stop the hint and start counting idle time again.
+    resetHintTimer();
 
     const cost = Number(iconEl.dataset.cost) || 0;
     setCurrencyDisplay(Math.max(0, currency - cost), false);
@@ -5154,7 +5272,8 @@ window.RESULT_IMAGES = {
       620 + Math.max(0, icons.length - 1) * 52 + 80;
     window.setTimeout(() => {
       iconsLayer.classList.remove("is-peak-intro");
-      resetHintTimer();
+      startScene0Tutorial();
+      if (!scene0TutorialActive) resetHintTimer();
     }, ms);
   }
 
