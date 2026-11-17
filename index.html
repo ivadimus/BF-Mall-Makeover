@@ -782,11 +782,21 @@ body {
   animation: cell-hint-pulse 0.75s cubic-bezier(0.45, 0, 0.55, 1) 2;
 }
 
-/* After splash broom: peaks hidden until the sweep finishes, then bounce in. */
+/* After splash broom: peaks hidden until the sweep + exit finish, then bounce in. */
+.icons-layer.is-awaiting-intro {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .icons-layer.is-awaiting-intro .cell-icon {
   opacity: 0;
   pointer-events: none;
   scale: 0.35;
+}
+
+.icons-layer.is-peak-intro {
+  visibility: visible;
+  pointer-events: none;
 }
 
 .icons-layer.is-peak-intro .cell-icon {
@@ -3386,8 +3396,7 @@ window.RESULT_IMAGES = {
     // ensureDustLayer(width, height);
 
     if (firstSceneIntroPending) {
-      iconsLayer.classList.add("is-awaiting-intro");
-      iconsLayer.classList.remove("is-peak-intro");
+      syncPeaksIntroHidden();
     } else {
       iconsLayer.classList.remove("is-awaiting-intro", "is-peak-intro");
       resetHintTimer();
@@ -5117,8 +5126,8 @@ window.RESULT_IMAGES = {
     { y: 475, dir: 1 },
   ];
   const SWEEP_PASS_MS = 560;
-  const SWEEP_RADIUS = 175;
-  const SWEEP_BROOM_W = 210;
+  const SWEEP_RADIUS = 165;
+  const SWEEP_BROOM_W = 158;
   /** After the last pass the broom lifts off before peaks appear. */
   const SPLASH_BROOM_EXIT_MS = 480;
   const PEAK_INTRO_DELAY_MS = 500;
@@ -5126,7 +5135,15 @@ window.RESULT_IMAGES = {
   /** Same SKU brush icon as on the peaks (assets/SKU.webp). */
   const SWEEP_BROOM_TIP = BRUSH_TIP;
 
+  function syncPeaksIntroHidden() {
+    if (firstSceneIntroPending) {
+      iconsLayer.classList.add("is-awaiting-intro");
+      iconsLayer.classList.remove("is-peak-intro");
+    }
+  }
+
   function playPeakIntro() {
+    firstSceneIntroPending = false;
     const icons = iconsLayer.querySelectorAll(".cell-icon");
     icons.forEach((el, i) => {
       el.style.setProperty("--peak-idx", String(i));
@@ -5142,6 +5159,7 @@ window.RESULT_IMAGES = {
   }
 
   function playSplashSweep(onDone) {
+    syncPeaksIntroHidden();
     const width = layoutWidth || getStageSize().width;
     const height = layoutHeight || getStageSize().height;
     const k = Math.min(3, Math.max(1, stageScale() * (window.devicePixelRatio || 1)));
@@ -5183,17 +5201,18 @@ window.RESULT_IMAGES = {
     sg.fillRect(0, 0, R * 2, R * 2);
 
     const puffs = [];
+    let lastSweepPuffAt = 0;
     function spawnPuffs(x, y, n, spread) {
       for (let i = 0; i < n; i++) {
         puffs.push({
           x: x + rand(-spread, spread),
-          y: y + rand(-spread * 0.6, spread * 0.6),
-          vx: rand(-40, 40),
-          vy: rand(-70, -10),
-          r: rand(26, 56),
-          grow: rand(40, 90),
+          y: y + rand(-spread * 0.45, spread * 0.45),
+          vx: rand(-26, 26),
+          vy: rand(-48, -8),
+          r: rand(14, 32),
+          grow: rand(22, 48),
           age: 0,
-          life: rand(0.7, 1.15),
+          life: rand(0.45, 0.85),
           tint: Math.random() < 0.5 ? "232,232,238" : "205,205,214",
         });
       }
@@ -5246,7 +5265,10 @@ window.RESULT_IMAGES = {
         }
         pctx.globalCompositeOperation = "source-over";
         prev = { x: cx, y: cy };
-        spawnPuffs(pos.x - pos.dir * 70, pos.y + 40, 3, 55);
+        if (now - lastSweepPuffAt > 95) {
+          lastSweepPuffAt = now;
+          spawnPuffs(pos.x - pos.dir * 55, pos.y + 36, 1, 38);
+        }
       }
 
       fctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -5263,7 +5285,7 @@ window.RESULT_IMAGES = {
         p.y += p.vy * dt;
         const u = p.age / p.life;
         const r = p.r + p.grow * u;
-        const a = 0.55 * (1 - u) * Math.min(1, p.age / 0.08);
+        const a = 0.32 * (1 - u) * Math.min(1, p.age / 0.08);
         const g = fctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
         g.addColorStop(0, `rgba(${p.tint},${a.toFixed(3)})`);
         g.addColorStop(0.6, `rgba(${p.tint},${(a * 0.6).toFixed(3)})`);
@@ -5350,8 +5372,8 @@ window.RESULT_IMAGES = {
       splashOpen = false;
       transitionBusy = true;
       splash.style.pointerEvents = "none";
+      syncPeaksIntroHidden();
       playSplashSweep(() => {
-        firstSceneIntroPending = false;
         transitionBusy = false;
         window.setTimeout(playPeakIntro, PEAK_INTRO_DELAY_MS);
       });
