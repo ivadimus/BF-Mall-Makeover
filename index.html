@@ -3981,15 +3981,6 @@ window.RESULT_IMAGES = {
     const sweptCtx = swept.getContext("2d", canvasOpts);
     let dissolve = null;
     let dissolveFailed = false;
-  if (dissolveImage.complete && dissolveImage.naturalWidth > 0) {
-      dissolve = prepareDissolveField(
-        bbox,
-        width,
-        height,
-        tune.dissolveSampleMax
-      );
-      if (!dissolve) dissolveFailed = true;
-    }
     const dissolveBlitCtx = dissolveBlit.getContext("2d", canvasOpts);
 
     const stampRadius = BRUSH_TRAIL_RADIUS_PX;
