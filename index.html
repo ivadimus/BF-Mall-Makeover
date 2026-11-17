@@ -1122,6 +1122,59 @@ body {
   -webkit-user-drag: none;
 }
 
+/* Sparkles on the Mall Makeover logo until the player taps. */
+.splash-logo-sparkles {
+  position: absolute;
+  left: 50%;
+  top: 36%;
+  width: 42%;
+  height: 28%;
+  max-width: 320px;
+  max-height: 168px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 2;
+  overflow: visible;
+}
+
+.splash-sparkle {
+  position: absolute;
+  margin: 0;
+  transform: translate(-50%, -50%) scale(0.35);
+  opacity: 0;
+  background: #fff;
+  clip-path: polygon(
+    50% 0%,
+    62% 38%,
+    100% 50%,
+    62% 62%,
+    50% 100%,
+    38% 62%,
+    0% 50%,
+    38% 38%
+  );
+  filter: drop-shadow(0 0 4px rgba(255, 245, 200, 0.95))
+    drop-shadow(0 0 8px rgba(255, 220, 120, 0.55));
+  animation: splash-logo-sparkle 1.05s ease-in-out infinite;
+  animation-delay: var(--splash-spark-delay, 0ms);
+}
+
+@keyframes splash-logo-sparkle {
+  0%,
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.3) rotate(0deg);
+  }
+  42% {
+    opacity: 1;
+    transform: translate(-50%, -52%) scale(1.05) rotate(14deg);
+  }
+  68% {
+    opacity: 0.35;
+    transform: translate(-50%, -54%) scale(0.55) rotate(-6deg);
+  }
+}
+
 /* Start picture on a canvas while the broom sweeps; second canvas for broom + dust. */
 .splash-canvas,
 .splash-fx {
@@ -1652,6 +1705,7 @@ body {
           <!-- Start screen -->
           <div class="splash" id="splash">
             <img class="splash-img" id="splash-img" alt="The Mall Makeover. Tap to continue" draggable="false" />
+            <div class="splash-logo-sparkles" id="splash-logo-sparkles" aria-hidden="true"></div>
           </div>
           <div class="whiteout" id="whiteout"></div>
         </div>
@@ -2211,6 +2265,8 @@ window.RESULT_IMAGES = {
   const rewardPopup = document.getElementById("reward-popup");
   const blackout = document.getElementById("blackout");
   const splash = document.getElementById("splash");
+  const splashLogoSparkles = document.getElementById("splash-logo-sparkles");
+  let splashSparkleTimer = 0;
   const whiteout = document.getElementById("whiteout");
   // The start screen picture is the file assets/Splashscreen.webp (replace the file to change it).
   // If that file is missing, the copy embedded in this page is used instead.
@@ -5237,6 +5293,41 @@ window.RESULT_IMAGES = {
     startNextGame(true);
   }
 
+  function stopSplashLogoSparkles() {
+    window.clearInterval(splashSparkleTimer);
+    splashSparkleTimer = 0;
+    if (splashLogoSparkles) splashLogoSparkles.innerHTML = "";
+  }
+
+  function spawnSplashLogoSparkle() {
+    if (!splashOpen || !splashLogoSparkles) return;
+    const el = document.createElement("span");
+    const size = 11 + Math.random() * 15;
+    el.className = "splash-sparkle";
+    el.style.width = `${size}px`;
+    el.style.height = `${size}px`;
+    el.style.left = `${14 + Math.random() * 72}%`;
+    el.style.top = `${10 + Math.random() * 80}%`;
+    el.style.setProperty("--splash-spark-delay", `${Math.random() * 500}ms`);
+    el.style.animationDuration = `${0.82 + Math.random() * 0.55}s`;
+    splashLogoSparkles.appendChild(el);
+    window.setTimeout(() => el.remove(), 1500);
+  }
+
+  function startSplashLogoSparkles() {
+    stopSplashLogoSparkles();
+    if (!splashOpen) return;
+    for (let i = 0; i < 7; i++) spawnSplashLogoSparkle();
+    splashSparkleTimer = window.setInterval(() => {
+      if (!splashOpen) {
+        stopSplashLogoSparkles();
+        return;
+      }
+      spawnSplashLogoSparkle();
+      if (Math.random() < 0.5) spawnSplashLogoSparkle();
+    }, 360);
+  }
+
   /* ---------- Start screen: the broom sweeps the picture away ---------- */
   const SWEEP_PASSES = [
     { y: 125, dir: 1 },
@@ -5489,6 +5580,7 @@ window.RESULT_IMAGES = {
     splash.addEventListener("click", () => {
       if (!splashOpen || transitionBusy) return;
       splashOpen = false;
+      stopSplashLogoSparkles();
       transitionBusy = true;
       splash.style.pointerEvents = "none";
       syncPeaksIntroHidden();
