@@ -2067,20 +2067,24 @@ window.RESULT_IMAGES = {
   function brushWipeTuning() {
     if (!isCoarsePointerDevice()) {
       return {
+        renderScale: 1,
         stampStepMul: 0.3,
         trailBlur: BRUSH_TRAIL_BLEND_BLUR_PX,
         dissolveStep: 0.03,
         puffGap: 28,
         puffCountMul: 1,
+        simpleDissolve: false,
       };
     }
-    // Soft stamp is pre-blurred; skip full-frame blur (iOS drops it and leaves hard edges).
+  // Lower-res wipe buffers + soft feather dissolve (dissolve.png is heavy on iOS).
     return {
-      stampStepMul: 0.28,
+      renderScale: 0.62,
+      stampStepMul: 0.3,
       trailBlur: 0,
-      dissolveStep: 0.03,
-      puffGap: 40,
-      puffCountMul: 0.75,
+      dissolveStep: 0.05,
+      puffGap: 48,
+      puffCountMul: 0,
+      simpleDissolve: true,
     };
   }
 
@@ -3757,35 +3761,60 @@ window.RESULT_IMAGES = {
     const width = layoutWidth;
     const height = layoutHeight;
     const tune = brushWipeTuning();
+    const rs = tune.renderScale || 1;
+    const iw = Math.max(1, Math.round(width * rs));
+    const ih = Math.max(1, Math.round(height * rs));
     const softEdge = buildSoftCellMask(width, height, polygon);
     const bbox = polygonBBox(polygon);
     const centre = cellIconSpots.get(cellId) || null;
     const area = localBrushArea(polygon, bbox, centre);
 
+    const canvasOpts = { alpha: true, desynchronized: true };
     const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
+    canvas.width = iw;
+    canvas.height = ih;
     canvas.className = "brush-wipe-canvas";
     vfxLayer.appendChild(canvas);
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d", canvasOpts);
+
+    function withLayoutScale(c, fn) {
+      c.save();
+      if (rs !== 1) c.setTransform(rs, 0, 0, rs, 0, 0);
+      fn();
+      c.restore();
+    }
+
+    function clipToSoftMask(c, op) {
+      c.save();
+      c.globalCompositeOperation = op;
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      if (rs !== 1) {
+        c.drawImage(softEdge, 0, 0, width, height, 0, 0, iw, ih);
+      } else {
+        c.drawImage(softEdge, 0, 0);
+      }
+      c.restore();
+    }
 
     const pieceBase = document.createElement("canvas");
-    pieceBase.width = width;
-    pieceBase.height = height;
-    const pieceBaseCtx = pieceBase.getContext("2d");
-    drawImageCover(pieceBaseCtx, stateAImage, 0, 0, width, height);
-    pieceBaseCtx.globalCompositeOperation = "destination-in";
-    pieceBaseCtx.drawImage(softEdge, 0, 0);
+    pieceBase.width = iw;
+    pieceBase.height = ih;
+    const pieceBaseCtx = pieceBase.getContext("2d", canvasOpts);
+    withLayoutScale(pieceBaseCtx, () => {
+      drawImageCover(pieceBaseCtx, stateAImage, 0, 0, width, height);
+      pieceBaseCtx.globalCompositeOperation = "destination-in";
+      pieceBaseCtx.drawImage(softEdge, 0, 0);
+    });
 
     const sweptBlur = document.createElement("canvas");
-    sweptBlur.width = width;
-    sweptBlur.height = height;
-    const sweptBlurCtx = sweptBlur.getContext("2d");
+    sweptBlur.width = iw;
+    sweptBlur.height = ih;
+    const sweptBlurCtx = sweptBlur.getContext("2d", canvasOpts);
     let sweptBlurStale = true;
 
     const dissolveBlit = document.createElement("canvas");
-    dissolveBlit.width = width;
-    dissolveBlit.height = height;
+    dissolveBlit.width = iw;
+    dissolveBlit.height = ih;
     let dissolveBlitP = -1;
 
     const fxLayer = document.createElement("div");
@@ -3869,9 +3898,9 @@ window.RESULT_IMAGES = {
 
     // Swept-away dust accumulates here and is punched out of the piece.
     const swept = document.createElement("canvas");
-    swept.width = width;
-    swept.height = height;
-    const sweptCtx = swept.getContext("2d");
+    swept.width = iw;
+    swept.height = ih;
+    const sweptCtx = swept.getContext("2d", canvasOpts);
     let dissolve = null;
     let dissolveFailed = false;
 
@@ -3926,17 +3955,25 @@ window.RESULT_IMAGES = {
         1,
         Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / stampStep)
       );
-      sweptCtx.globalCompositeOperation = "source-over";
-      for (let i = 1; i <= steps; i++) {
-        const p = brushPathPoint(polygon, area, fromS + (toS - fromS) * (i / steps), plan);
-        sweptCtx.drawImage(stamp, p.x - stampW / 2, p.y - stampH / 2, stampW, stampH);
-      }
+      withLayoutScale(sweptCtx, () => {
+        sweptCtx.globalCompositeOperation = "source-over";
+        for (let i = 1; i <= steps; i++) {
+          const p = brushPathPoint(
+            polygon,
+            area,
+            fromS + (toS - fromS) * (i / steps),
+            plan
+          );
+          sweptCtx.drawImage(stamp, p.x - stampW / 2, p.y - stampH / 2, stampW, stampH);
+        }
+      });
       sweptBlurStale = true;
       return b;
     }
 
     /** Dust clouds kicked up ahead of the bristles, drifting the way the brush moves. */
     function emitPuffs(p) {
+      if (tune.puffCountMul <= 0) return;
       const now = performance.now();
       if (now - lastPuffAt < tune.puffGap) return;
       lastPuffAt = now;
@@ -3963,13 +4000,13 @@ window.RESULT_IMAGES = {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = "source-over";
-      ctx.clearRect(0, 0, width, height);
+      ctx.clearRect(0, 0, iw, ih);
 
       ctx.drawImage(pieceBase, 0, 0);
 
       if (sweptBlurStale) {
         sweptBlurCtx.setTransform(1, 0, 0, 1, 0, 0);
-        sweptBlurCtx.clearRect(0, 0, width, height);
+        sweptBlurCtx.clearRect(0, 0, iw, ih);
         const blurPx = tune.trailBlur;
         if (blurPx > 0) {
           sweptBlurCtx.filter = `blur(${blurPx}px)`;
@@ -3982,20 +4019,29 @@ window.RESULT_IMAGES = {
       }
       ctx.globalCompositeOperation = "destination-out";
       ctx.drawImage(sweptBlur, 0, 0);
-      // Keep the piece’s outer feather even when the eraser bites the edge.
-      ctx.globalCompositeOperation = "destination-in";
-      ctx.drawImage(softEdge, 0, 0);
-      ctx.globalCompositeOperation = "source-over";
+      clipToSoftMask(ctx, "destination-in");
 
       const endP = endDissolveProgress(t);
       if (endP > 0) {
-        if (!dissolve && !dissolveFailed) {
+        if (tune.simpleDissolve) {
+          withLayoutScale(ctx, () => {
+            ctx.globalCompositeOperation = "destination-out";
+            ctx.fillStyle = `rgba(0,0,0,${endP.toFixed(3)})`;
+            ctx.fillRect(
+              bbox.minX - FEATHER,
+              bbox.minY - FEATHER,
+              bbox.width + FEATHER * 2,
+              bbox.height + FEATHER * 2
+            );
+          });
+          clipToSoftMask(ctx, "destination-in");
+        } else if (!dissolve && !dissolveFailed) {
           dissolve = prepareDissolveField(bbox, width, height);
           if (dissolve === null && dissolveImage.complete) {
             dissolveFailed = true;
           }
         }
-        if (dissolve) {
+        if (!tune.simpleDissolve && dissolve) {
           try {
             const dissolveStep = tune.dissolveStep;
             if (
@@ -4003,28 +4049,34 @@ window.RESULT_IMAGES = {
               endP >= 1 ||
               endP - dissolveBlitP >= dissolveStep
             ) {
-              const dctx = dissolveBlit.getContext("2d");
+              const dctx = dissolveBlit.getContext("2d", canvasOpts);
               dctx.setTransform(1, 0, 0, 1, 0, 0);
-              dctx.clearRect(0, 0, width, height);
-              dctx.globalCompositeOperation = "destination-out";
-              drawDissolveHole(dctx, dissolve, endP);
+              dctx.clearRect(0, 0, iw, ih);
+              withLayoutScale(dctx, () => {
+                dctx.globalCompositeOperation = "destination-out";
+                drawDissolveHole(dctx, dissolve, endP);
+              });
               dissolveBlitP = endP;
             }
             ctx.globalCompositeOperation = "destination-out";
             ctx.drawImage(dissolveBlit, 0, 0);
-            ctx.globalCompositeOperation = "destination-in";
-            ctx.drawImage(softEdge, 0, 0);
-            ctx.globalCompositeOperation = "source-over";
+            clipToSoftMask(ctx, "destination-in");
           } catch (err) {
             console.warn("Dissolve draw failed:", err);
             dissolveFailed = true;
             dissolve = null;
+            withLayoutScale(ctx, () => {
+              ctx.globalCompositeOperation = "destination-out";
+              ctx.fillStyle = `rgba(0,0,0,${endP.toFixed(3)})`;
+              ctx.fillRect(0, 0, width, height);
+            });
+          }
+        } else if (!tune.simpleDissolve && !dissolve) {
+          withLayoutScale(ctx, () => {
+            ctx.globalCompositeOperation = "destination-out";
             ctx.fillStyle = `rgba(0,0,0,${endP.toFixed(3)})`;
             ctx.fillRect(0, 0, width, height);
-          }
-        } else {
-          ctx.fillStyle = `rgba(0,0,0,${endP.toFixed(3)})`;
-          ctx.fillRect(0, 0, width, height);
+          });
         }
       }
       ctx.globalCompositeOperation = "source-over";
