@@ -2238,17 +2238,27 @@ window.RESULT_IMAGES = {
   function brushWipeTuning() {
     const coarse = isCoarsePointerDevice();
     return {
-      renderScale: coarse ? 0.68 : 1,
-      stampStepMul: coarse ? 0.34 : 0.3,
+      renderScale: coarse ? 0.54 : 1,
+      stampStepMul: coarse ? 0.42 : 0.3,
       trailBlur: coarse ? 0 : BRUSH_TRAIL_BLEND_BLUR_PX,
-      dissolveStep: coarse ? 0.1 : 0.04,
-      dissolveSampleMax: coarse ? 128 : null,
-      maxStampStepsPerFrame: coarse ? 7 : 0,
-      frameMinMs: coarse ? 40 : 0,
+      dissolveStep: coarse ? 0.12 : 0.04,
+      dissolveSampleMax: coarse ? 96 : null,
+      maxStampStepsPerFrame: coarse ? 4 : 0,
+      maxSweepDeltaPerFrame: coarse ? 0.055 : 0,
+      frameMinMs: coarse ? 50 : 0,
+      pixelBudget: coarse ? 88000 : 0,
       puffGap: coarse ? 48 : 28,
       puffCountMul: coarse ? 0 : 1,
       simpleDissolve: coarse,
     };
+  }
+
+  let spongeStampCache = null;
+  function getSpongeStamp() {
+    if (!spongeStampCache) {
+      spongeStampCache = buildSpongeStamp(BRUSH_TRAIL_RADIUS_PX);
+    }
+    return spongeStampCache;
   }
 
   function splashCanvasScale(width, height) {
@@ -3584,15 +3594,29 @@ window.RESULT_IMAGES = {
     soft.height = h;
     const sctx = soft.getContext("2d");
 
-    const outline = organicCellPath(
-      VoronoiReveal.expandPolygon(poly, FEATHER * rs),
-      CORNER_RADIUS * rs,
-      EDGE_WAVE * rs
+    const expanded = VoronoiReveal.expandPolygon(
+      poly,
+      FEATHER * rs * (fast ? 0.72 : 1)
     );
-    const path = new Path2D(outline);
+    let path;
+    if (fast) {
+      let d = "";
+      if (expanded.length >= 3) {
+        d = `M ${expanded[0].x.toFixed(1)} ${expanded[0].y.toFixed(1)}`;
+        for (let i = 1; i < expanded.length; i++) {
+          d += ` L ${expanded[i].x.toFixed(1)} ${expanded[i].y.toFixed(1)}`;
+        }
+        d += " Z";
+      }
+      path = new Path2D(d);
+    } else {
+      path = new Path2D(
+        organicCellPath(expanded, CORNER_RADIUS * rs, EDGE_WAVE * rs)
+      );
+    }
 
     let edgeBlur = EDGE_FADE * rs * (rs === 1 ? 1.35 : 1);
-    if (fast) edgeBlur = Math.min(edgeBlur, 11);
+    if (fast) edgeBlur = Math.min(7, edgeBlur * 0.55);
     sctx.filter = edgeBlur > 0.35 ? `blur(${edgeBlur}px)` : "none";
     sctx.fillStyle = "#fff";
     sctx.fill(path);
@@ -3996,9 +4020,15 @@ window.RESULT_IMAGES = {
       height: bbox.height,
     };
 
-    const rs = tune.renderScale || 1;
-    const iw = Math.max(1, Math.round(cropW * rs));
-    const ih = Math.max(1, Math.round(cropH * rs));
+    let rs = tune.renderScale || 1;
+    let iw = Math.max(1, Math.round(cropW * rs));
+    let ih = Math.max(1, Math.round(cropH * rs));
+    const pixelBudget = tune.pixelBudget || 0;
+    while (pixelBudget > 0 && iw * ih > pixelBudget && rs > 0.4) {
+      rs *= 0.9;
+      iw = Math.max(1, Math.round(cropW * rs));
+      ih = Math.max(1, Math.round(cropH * rs));
+    }
     const coarse = isCoarsePointerDevice();
     const softEdgeFull = coarse
       ? null
@@ -4035,7 +4065,7 @@ window.RESULT_IMAGES = {
     canvas.style.width = `${cropW}px`;
     canvas.style.height = `${cropH}px`;
     vfxLayer.appendChild(canvas);
-    svgLayer.classList.add("is-brush-wiping");
+    if (!coarse) svgLayer.classList.add("is-brush-wiping");
     const ctx = canvas.getContext("2d", canvasOpts);
     if (ctx) {
       ctx.imageSmoothingEnabled = true;
@@ -4168,7 +4198,7 @@ window.RESULT_IMAGES = {
     const dissolveBlitCtx = dissolveBlit.getContext("2d", canvasOpts);
 
     const stampRadius = BRUSH_TRAIL_RADIUS_PX;
-    const stamp = buildSpongeStamp(stampRadius);
+    const stamp = getSpongeStamp();
     // The bristles leave a wide, flat trail.
     const stampW = stampRadius * 2.5;
     const stampH = stampRadius * 1.7;
@@ -4271,7 +4301,12 @@ window.RESULT_IMAGES = {
 
     function renderFrame() {
       const t = wipeProgress();
-      const sNow = sweepProgress(t);
+      let sNow = sweepProgress(t);
+      if (t >= BRUSH_SWEEP_END) sNow = 1;
+      const maxSweepJump = tune.maxSweepDeltaPerFrame;
+      if (maxSweepJump > 0) {
+        sNow = Math.min(sNow, prevS + maxSweepJump);
+      }
       const p = sweepSegment(prevS, sNow);
       prevS = sNow;
 
@@ -4296,7 +4331,7 @@ window.RESULT_IMAGES = {
         sweptBlurStale = false;
       }
       ctx.globalCompositeOperation = "destination-out";
-      ctx.drawImage(sweptBlur, 0, 0);
+      ctx.drawImage(tune.trailBlur > 0 ? sweptBlur : swept, 0, 0);
       clipToSoftMask(ctx, "destination-in");
 
       const endP = endDissolveProgress(t);
@@ -4439,13 +4474,15 @@ window.RESULT_IMAGES = {
       renderFrame();
       if (wipeProgress() >= 1) {
         // Last of the dust puffs off as the piece finishes.
-        burstDustPuffs(
-          vfxLayer,
-          (area.minX + area.maxX) / 2,
-          (area.minY + area.maxY) / 2,
-          12,
-          Math.min(area.width, area.height) * 0.42
-        );
+        if (!coarse) {
+          burstDustPuffs(
+            vfxLayer,
+            (area.minX + area.maxX) / 2,
+            (area.minY + area.maxY) / 2,
+            12,
+            Math.min(area.width, area.height) * 0.42
+          );
+        }
         playSpongeSparkles(bbox);
         cleanup();
         return;
@@ -4453,8 +4490,15 @@ window.RESULT_IMAGES = {
       rafId = requestAnimationFrame(tick);
     }
 
-    renderFrame();
-    rafId = requestAnimationFrame(tick);
+    const kickWipe = () => {
+      renderFrame();
+      rafId = requestAnimationFrame(tick);
+    };
+    if (coarse) {
+      requestAnimationFrame(() => requestAnimationFrame(kickWipe));
+    } else {
+      kickWipe();
+    }
   }
 
   /** Few clean-shine sparkles once a piece is scrubbed. */
