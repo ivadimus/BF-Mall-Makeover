@@ -288,6 +288,15 @@ body {
 .is-bare .reward-popup {
   padding: env(safe-area-inset-top, 0) 0 env(safe-area-inset-bottom, 0);
   box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  object-fit: contain;
+}
+
+.is-bare .reward-screen.is-visible .reward-popup {
+  transform: scale(1.22);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2076,11 +2085,11 @@ window.RESULT_IMAGES = {
         simpleDissolve: false,
       };
     }
-  // Lower-res wipe buffers + soft feather dissolve (dissolve.png is heavy on iOS).
+  // Slightly lower-res wipe buffers; keep soft trail + feather dissolve (no dissolve.png on iOS).
     return {
-      renderScale: 0.62,
-      stampStepMul: 0.3,
-      trailBlur: 0,
+      renderScale: 0.78,
+      stampStepMul: 0.28,
+      trailBlur: 4,
       dissolveStep: 0.05,
       puffGap: 48,
       puffCountMul: 0,
@@ -3376,15 +3385,18 @@ window.RESULT_IMAGES = {
    * Soft cell silhouette matching the SVG edge masks (feather + blur),
    * so the wipe never flashes hard polygon edges.
    */
-  function buildSoftCellMask(width, height, polygon) {
-    const coarse = isCoarsePointerDevice() && width * height > 350000;
-    const scale = coarse ? 0.5 : 1;
-    const w = Math.max(1, Math.round(width * scale));
-    const h = Math.max(1, Math.round(height * scale));
+  /**
+   * @param {number} [outW] — output width (defaults to width); feather scales with outW/width
+   * @param {number} [outH] — output height (defaults to height)
+   */
+  function buildSoftCellMask(width, height, polygon, outW, outH) {
+    const w = Math.max(1, Math.round(outW != null ? outW : width));
+    const h = Math.max(1, Math.round(outH != null ? outH : height));
+    const rs = w / width;
     const poly =
-      scale === 1
+      rs === 1
         ? polygon
-        : polygon.map((p) => ({ x: p.x * scale, y: p.y * scale }));
+        : polygon.map((p) => ({ x: p.x * rs, y: p.y * rs }));
 
     const soft = document.createElement("canvas");
     soft.width = w;
@@ -3392,26 +3404,20 @@ window.RESULT_IMAGES = {
     const sctx = soft.getContext("2d");
 
     const outline = organicCellPath(
-      VoronoiReveal.expandPolygon(poly, FEATHER * scale),
-      CORNER_RADIUS * scale,
-      EDGE_WAVE * scale
+      VoronoiReveal.expandPolygon(poly, FEATHER * rs),
+      CORNER_RADIUS * rs,
+      EDGE_WAVE * rs
     );
     const path = new Path2D(outline);
 
-    const edgeBlur = EDGE_FADE * scale;
-    sctx.filter = edgeBlur > 0 ? `blur(${edgeBlur}px)` : "none";
+    const edgeBlur =
+      EDGE_FADE * rs * (rs === 1 && isCoarsePointerDevice() ? 1.4 : 1);
+    sctx.filter = edgeBlur > 0.35 ? `blur(${edgeBlur}px)` : "none";
     sctx.fillStyle = "#fff";
     sctx.fill(path);
     sctx.filter = "none";
 
-    if (scale === 1) return soft;
-
-    const full = document.createElement("canvas");
-    full.width = width;
-    full.height = height;
-    const fctx = full.getContext("2d");
-    fctx.drawImage(soft, 0, 0, w, h, 0, 0, width, height);
-    return full;
+    return soft;
   }
 
   function pointInPolygon(point, polygon) {
@@ -3764,7 +3770,8 @@ window.RESULT_IMAGES = {
     const rs = tune.renderScale || 1;
     const iw = Math.max(1, Math.round(width * rs));
     const ih = Math.max(1, Math.round(height * rs));
-    const softEdge = buildSoftCellMask(width, height, polygon);
+    const softEdgeFull = buildSoftCellMask(width, height, polygon);
+    const softEdge = buildSoftCellMask(width, height, polygon, iw, ih);
     const bbox = polygonBBox(polygon);
     const centre = cellIconSpots.get(cellId) || null;
     const area = localBrushArea(polygon, bbox, centre);
@@ -3788,11 +3795,7 @@ window.RESULT_IMAGES = {
       c.save();
       c.globalCompositeOperation = op;
       c.setTransform(1, 0, 0, 1, 0, 0);
-      if (rs !== 1) {
-        c.drawImage(softEdge, 0, 0, width, height, 0, 0, iw, ih);
-      } else {
-        c.drawImage(softEdge, 0, 0);
-      }
+      c.drawImage(softEdge, 0, 0);
       c.restore();
     }
 
@@ -3802,9 +3805,10 @@ window.RESULT_IMAGES = {
     const pieceBaseCtx = pieceBase.getContext("2d", canvasOpts);
     withLayoutScale(pieceBaseCtx, () => {
       drawImageCover(pieceBaseCtx, stateAImage, 0, 0, width, height);
-      pieceBaseCtx.globalCompositeOperation = "destination-in";
-      pieceBaseCtx.drawImage(softEdge, 0, 0);
     });
+    pieceBaseCtx.setTransform(1, 0, 0, 1, 0, 0);
+    pieceBaseCtx.globalCompositeOperation = "destination-in";
+    pieceBaseCtx.drawImage(softEdge, 0, 0);
 
     const sweptBlur = document.createElement("canvas");
     sweptBlur.width = iw;
@@ -3942,7 +3946,7 @@ window.RESULT_IMAGES = {
       cancelAnimationFrame(rafId);
       canvas.remove();
       fxLayer.remove();
-      commitDustHole(softEdge);
+      commitDustHole(softEdgeFull);
       onDone();
     }
 
