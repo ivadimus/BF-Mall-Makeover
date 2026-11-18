@@ -316,8 +316,13 @@ body {
   object-fit: contain;
 }
 
-.is-bare .reward-screen.is-visible .reward-popup {
+.is-bare .reward-screen.is-visible.is-makeover .reward-popup {
   transform: scale(1.22);
+}
+
+.is-bare .reward-screen.is-visible:not(.is-makeover) .reward-popup {
+  object-position: center calc(50% + 6vh);
+  transform: scale(calc(1.22 * 1.1));
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -963,20 +968,6 @@ body {
   visibility: hidden;
 }
 
-/* Extra dark strip along the very top, fading down (2560×599 design; behind the pictures). */
-.reward-screen::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  aspect-ratio: 2560 / 599;
-  max-height: 70%;
-  z-index: 0;
-  pointer-events: none;
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0.8) 5%, rgba(0, 0, 0, 0.8) 10%, rgba(0, 0, 0, 0.8) 15%, rgba(0, 0, 0, 0.8) 20%, rgba(0, 0, 0, 0.8) 25%, rgba(0, 0, 0, 0.8) 30%, rgba(0, 0, 0, 0.8) 35%, rgba(0, 0, 0, 0.793) 40%, rgba(0, 0, 0, 0.78) 45%, rgba(0, 0, 0, 0.753) 50%, rgba(0, 0, 0, 0.701) 55%, rgba(0, 0, 0, 0.616) 60%, rgba(0, 0, 0, 0.495) 65%, rgba(0, 0, 0, 0.349) 70%, rgba(0, 0, 0, 0.212) 75%, rgba(0, 0, 0, 0.105) 80%, rgba(0, 0, 0, 0.04) 85%, rgba(0, 0, 0, 0.012) 90%, rgba(0, 0, 0, 0.003) 95%, rgba(0, 0, 0, 0) 100%);
-}
-
 .info-overlay::before {
   content: "";
   position: absolute;
@@ -996,7 +987,7 @@ body {
   z-index: 1;
 }
 
-/* Result screens: one 80% dark layer that stays put while the picture on it changes.
+/* Result screens: one 85% dark layer that stays put while the picture on it changes.
    - after every scene: "Stage Completed!" picture
    - after the last scene: "The Makeover Completed!" picture, then the "Let's Go Again!" card. */
 .reward-screen {
@@ -1018,7 +1009,7 @@ body {
 }
 
 .reward-screen.is-visible {
-  background: rgba(0, 0, 0, 0.8);
+  background: rgba(0, 0, 0, 0.85);
   opacity: 1;
   pointer-events: auto;
 }
@@ -1045,6 +1036,11 @@ body {
 .reward-screen.is-visible .reward-popup {
   opacity: 1;
   transform: scale(1);
+}
+
+.reward-screen.is-visible:not(.is-makeover) .reward-popup {
+  object-position: center calc(50% + 6vh);
+  transform: scale(1.1);
 }
 
 /* Broom and coins of the Makeover screen: fixed to the two bottom corners of the screen, sized
@@ -1724,7 +1720,7 @@ html:not(.is-bare).web-cursor-pressed .device * {
               <img src="assets/close_btn_LS.webp" alt="" draggable="false" />
             </button>
           </div>
-          <!-- Result screen: 80% dark layer + picture. The picture is "Stage Completed!" after every
+          <!-- Result screen: 85% dark layer + picture. The picture is "Stage Completed!" after every
                scene; after the last scene it is "The Makeover Completed!" and then "Let's Go Again!". -->
           <div class="reward-screen" id="reward-screen" hidden>
             <!-- Broom (left) and coins (right) stick to the bottom corners of the screen. -->
