@@ -1649,15 +1649,15 @@ body {
   .rotate-hint-phone { animation: none; transform: rotate(-90deg); }
 }
 
-/* Desktop web: hand cursor inside the phone screen; shrinks while pressed. */
+/* Desktop web: hand cursor inside the phone screen (JS toggles pressed size). */
 html:not(.is-bare) .device,
 html:not(.is-bare) .device * {
-  cursor: url("assets/web-cursor-80.png") 22 7, pointer;
+  cursor: url("assets/web-cursor-80.png") 22 7, pointer !important;
 }
 
-html:not(.is-bare) .device:active,
-html:not(.is-bare) .device *:active {
-  cursor: url("assets/web-cursor-56.png") 16 5, pointer;
+html:not(.is-bare).web-cursor-pressed .device,
+html:not(.is-bare).web-cursor-pressed .device * {
+  cursor: url("assets/web-cursor-56.png") 16 5, pointer !important;
 }
 
   </style>
@@ -5752,6 +5752,38 @@ window.RESULT_IMAGES = {
       }
 
       document.addEventListener("pointerdown", goFullScreen, { once: true });
+    })();
+  </script>
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var device = document.querySelector(".device");
+      if (!device) return;
+
+      function webDemo() {
+        return !root.classList.contains("is-bare");
+      }
+
+      function pointInDevice(x, y) {
+        var r = device.getBoundingClientRect();
+        return (
+          x >= r.left && x <= r.right && y >= r.top && y <= r.bottom
+        );
+      }
+
+      function onDown(e) {
+        if (!webDemo() || !pointInDevice(e.clientX, e.clientY)) return;
+        root.classList.add("web-cursor-pressed");
+      }
+
+      function release() {
+        root.classList.remove("web-cursor-pressed");
+      }
+
+      window.addEventListener("pointerdown", onDown, true);
+      window.addEventListener("pointerup", release, true);
+      window.addEventListener("pointercancel", release, true);
+      window.addEventListener("blur", release);
     })();
   </script>
 </body>
