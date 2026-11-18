@@ -2246,19 +2246,19 @@ window.RESULT_IMAGES = {
     );
   }
 
-  /** One wipe profile; phone trades resolution for steady frame rate. */
+  /** One wipe profile; phone uses smaller canvases, wall-clock sweep (no artificial lag). */
   function brushWipeTuning() {
     const coarse = isCoarsePointerDevice();
     return {
-      renderScale: coarse ? 0.54 : 1,
-      stampStepMul: coarse ? 0.42 : 0.3,
+      renderScale: coarse ? 0.56 : 1,
+      stampStepMul: coarse ? 0.46 : 0.3,
       trailBlur: coarse ? 0 : BRUSH_TRAIL_BLEND_BLUR_PX,
-      dissolveStep: coarse ? 0.12 : 0.04,
+      dissolveStep: coarse ? 0.14 : 0.04,
       dissolveSampleMax: coarse ? 96 : null,
-      maxStampStepsPerFrame: coarse ? 4 : 0,
-      maxSweepDeltaPerFrame: coarse ? 0.055 : 0,
-      frameMinMs: coarse ? 50 : 0,
-      pixelBudget: coarse ? 88000 : 0,
+      maxStampStepsPerFrame: coarse ? 22 : 0,
+      maxSweepDeltaPerFrame: 0,
+      frameMinMs: 0,
+      pixelBudget: coarse ? 92000 : 0,
       puffGap: coarse ? 48 : 28,
       puffCountMul: coarse ? 0 : 1,
       simpleDissolve: coarse,
@@ -3628,7 +3628,7 @@ window.RESULT_IMAGES = {
     }
 
     let edgeBlur = EDGE_FADE * rs * (rs === 1 ? 1.35 : 1);
-    if (fast) edgeBlur = Math.min(7, edgeBlur * 0.55);
+    if (fast) edgeBlur = Math.min(12, Math.max(4, edgeBlur * 0.78));
     sctx.filter = edgeBlur > 0.35 ? `blur(${edgeBlur}px)` : "none";
     sctx.fillStyle = "#fff";
     sctx.fill(path);
@@ -4067,7 +4067,9 @@ window.RESULT_IMAGES = {
       }
     }
 
-    const canvasOpts = { alpha: true, desynchronized: false };
+    const canvasOpts = coarse
+      ? { alpha: true, desynchronized: true, willReadFrequently: false }
+      : { alpha: true, desynchronized: false };
     const canvas = document.createElement("canvas");
     canvas.width = iw;
     canvas.height = ih;
@@ -4261,21 +4263,29 @@ window.RESULT_IMAGES = {
     /** Stamp the bristle footprint along the path travelled since last frame. */
     function sweepSegment(fromS, toS) {
       const a = brushPathPoint(polygon, area, fromS, plan);
-      const b = brushPathPoint(polygon, area, toS, plan);
-      if (toS <= fromS) return b;
+      if (toS <= fromS) {
+        const pt = brushPathPoint(polygon, area, toS, plan);
+        return { p: pt, s: toS };
+      }
+      let endS = toS;
+      let b = brushPathPoint(polygon, area, endS, plan);
       let steps = Math.max(
         1,
         Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / stampStep)
       );
       const stepCap = tune.maxStampStepsPerFrame;
-      if (stepCap > 0) steps = Math.min(steps, stepCap);
+      if (stepCap > 0 && steps > stepCap) {
+        endS = fromS + (toS - fromS) * (stepCap / steps);
+        b = brushPathPoint(polygon, area, endS, plan);
+        steps = stepCap;
+      }
       withLayoutScale(sweptCtx, () => {
         sweptCtx.globalCompositeOperation = "source-over";
         for (let i = 1; i <= steps; i++) {
           const p = brushPathPoint(
             polygon,
             area,
-            fromS + (toS - fromS) * (i / steps),
+            fromS + (endS - fromS) * (i / steps),
             plan
           );
           sweptCtx.drawImage(
@@ -4288,7 +4298,7 @@ window.RESULT_IMAGES = {
         }
       });
       sweptBlurStale = true;
-      return b;
+      return { p: b, s: endS };
     }
 
     /** Dust clouds kicked up ahead of the bristles, drifting the way the brush moves. */
@@ -4315,12 +4325,9 @@ window.RESULT_IMAGES = {
       const t = wipeProgress();
       let sNow = sweepProgress(t);
       if (t >= BRUSH_SWEEP_END) sNow = 1;
-      const maxSweepJump = tune.maxSweepDeltaPerFrame;
-      if (maxSweepJump > 0) {
-        sNow = Math.min(sNow, prevS + maxSweepJump);
-      }
-      const p = sweepSegment(prevS, sNow);
-      prevS = sNow;
+      const sweep = sweepSegment(prevS, sNow);
+      prevS = sweep.s;
+      const p = sweep.p;
 
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalAlpha = 1;
