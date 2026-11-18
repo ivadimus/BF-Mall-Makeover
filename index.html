@@ -1649,10 +1649,15 @@ body {
   .rotate-hint-phone { animation: none; transform: rotate(-90deg); }
 }
 
-/* Desktop web: one native cursor (hand image) inside the phone screen only. */
+/* Desktop web: hand cursor inside the phone screen; shrinks while pressed. */
 html:not(.is-bare) .device,
 html:not(.is-bare) .device * {
-  cursor: url("assets/web-cursor-96.png") 27 8, pointer;
+  cursor: url("assets/web-cursor-80.png") 22 7, pointer;
+}
+
+html:not(.is-bare) .device:active,
+html:not(.is-bare) .device *:active {
+  cursor: url("assets/web-cursor-56.png") 16 5, pointer;
 }
 
   </style>
