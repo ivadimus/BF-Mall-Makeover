@@ -1134,6 +1134,8 @@ body {
   background: #000;
   cursor: pointer;
   overflow: hidden;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .splash[hidden] {
@@ -1764,8 +1766,14 @@ html:not(.is-bare).web-cursor-pressed .device * {
       var root = document.documentElement;
 
       function isRealPhone() {
-        var coarse = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
-        return coarse && Math.min(window.innerWidth, window.innerHeight) < 600;
+        var ua = navigator.userAgent || "";
+        var iosPhone = /iPhone|iPod/i.test(ua);
+        var narrow = Math.min(window.innerWidth, window.innerHeight) < 600;
+        var coarse =
+          window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+        var touch = navigator.maxTouchPoints > 0;
+        // iOS Chrome (CriOS) is still WebKit — treat iPhone touch as mobile bare.
+        return narrow && touch && (coarse || iosPhone);
       }
 
       function fit() {
@@ -2232,7 +2240,13 @@ window.RESULT_IMAGES = {
 (function () {
   "use strict";
 
-  const PROTOTYPE_BUILD = "splash-dust3";
+  const PROTOTYPE_BUILD = "ios-chrome4";
+
+  function isIosWebKit() {
+    const ua = navigator.userAgent || "";
+    if (/iPhone|iPad|iPod/i.test(ua)) return true;
+    return navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+  }
 
   /** Wall-clock length of one brush clean (pick-up + sweeping + lift-off). */
   const WIPE_MS = 540;
@@ -2277,14 +2291,15 @@ window.RESULT_IMAGES = {
   /** One wipe profile; phone uses smaller canvases, wall-clock sweep (no artificial lag). */
   function brushWipeTuning() {
     const coarse = isCoarsePointerDevice();
+    const ios = isIosWebKit();
     return {
-      renderScale: coarse ? 0.62 : 1,
+      renderScale: coarse ? (ios ? 0.64 : 0.62) : 1,
       stampStepMul: coarse ? 0.4 : 0.3,
-      trailRadiusMul: coarse ? 1.45 : 1,
-      stampBlurMul: coarse ? 1.4 : 1,
+      trailRadiusMul: coarse ? (ios ? 1.48 : 1.45) : 1,
+      stampBlurMul: coarse ? (ios ? 1.48 : 1.4) : 1,
       stampStretchW: coarse ? 1.34 : 1,
       stampStretchH: coarse ? 1.2 : 1,
-      trailBlur: coarse ? 8 : BRUSH_TRAIL_BLEND_BLUR_PX,
+      trailBlur: coarse ? (ios ? 9.5 : 8) : BRUSH_TRAIL_BLEND_BLUR_PX,
       compositeCleanUnder: coarse,
       dissolveStep: coarse ? 0.12 : 0.04,
       dissolveSampleMax: coarse ? 96 : null,
@@ -2292,9 +2307,9 @@ window.RESULT_IMAGES = {
       maxSweepDeltaPerFrame: 0,
       frameMinMs: 0,
       pixelBudget: coarse ? 108000 : 0,
-      puffGap: coarse ? 16 : 28,
-      puffCountMul: coarse ? 1.15 : 1,
-      puffSizeMul: coarse ? 1.28 : 1,
+      puffGap: coarse ? (ios ? 14 : 16) : 28,
+      puffCountMul: coarse ? (ios ? 1.22 : 1.15) : 1,
+      puffSizeMul: coarse ? (ios ? 1.34 : 1.28) : 1,
       simpleDissolve: coarse,
       maskEdgeBoost: coarse,
     };
@@ -5620,8 +5635,9 @@ window.RESULT_IMAGES = {
     sg.fillRect(0, 0, R * 2, R * 2);
 
     const puffs = [];
-    const splashDustMul = isCoarsePointerDevice() ? 1.25 : 1.45;
-  let lastSweepPuffAt = 0;
+    const splashDustMul =
+      (isCoarsePointerDevice() ? 1.25 : 1.45) * (isIosWebKit() ? 1.22 : 1);
+    let lastSweepPuffAt = 0;
     function spawnPuffs(x, y, n, spread) {
       const count = Math.max(1, Math.round(n * splashDustMul));
       const puffSpread = spread * (0.92 + splashDustMul * 0.12);
@@ -5646,8 +5662,16 @@ window.RESULT_IMAGES = {
     let prev = null;
     let finished = false;
     let lastExitPuffAt = 0;
-    const sweepPuffGapMs = isCoarsePointerDevice() ? 52 : 44;
-    const sweepPuffsPer = isCoarsePointerDevice() ? 3 : 4;
+    const sweepPuffGapMs = isCoarsePointerDevice()
+      ? isIosWebKit()
+        ? 46
+        : 52
+      : 44;
+    const sweepPuffsPer = isCoarsePointerDevice()
+      ? isIosWebKit()
+        ? 4
+        : 3
+      : 4;
 
     function broomAt(t) {
       const i = Math.min(SWEEP_PASSES.length - 1, Math.floor(t / SWEEP_PASS_MS));
@@ -5817,7 +5841,10 @@ window.RESULT_IMAGES = {
 
   function init() {
     const stamp = document.getElementById("build-stamp");
-    if (stamp) stamp.textContent = PROTOTYPE_BUILD;
+    if (stamp) {
+      const tag = isIosWebKit() ? "·ios" : "";
+      stamp.textContent = PROTOTYPE_BUILD + tag;
+    }
     try {
       fitPlayAreaToArt();
       buildScene();
@@ -5828,8 +5855,12 @@ window.RESULT_IMAGES = {
     }
 
     rewardScreen.addEventListener("click", loadNextScene);
-    splash.addEventListener("click", () => {
+    let splashTapAt = 0;
+    function startFromSplash() {
       if (!splashOpen || transitionBusy) return;
+      const now = Date.now();
+      if (now - splashTapAt < 320) return;
+      splashTapAt = now;
       splashOpen = false;
       stopSplashLogoSparkles();
       transitionBusy = true;
@@ -5839,7 +5870,9 @@ window.RESULT_IMAGES = {
         transitionBusy = false;
         window.setTimeout(playPeakIntro, PEAK_INTRO_DELAY_MS);
       });
-    });
+    }
+    splash.addEventListener("click", startFromSplash);
+    splash.addEventListener("pointerup", startFromSplash);
     replayButton.addEventListener("click", (event) => {
       event.stopPropagation();
       restartGame();
