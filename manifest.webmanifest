@@ -2,7 +2,7 @@
   "name": "Mall Makeover",
   "short_name": "Makeover",
   "description": "Black Friday Mall Makeover prototype",
-  "start_url": "./?v=scene-bg1-nov18",
+  "start_url": "./?v=scene-bg-nov18b",
   "display": "fullscreen",
   "orientation": "landscape",
   "background_color": "#000000",
