@@ -4475,7 +4475,8 @@ window.RESULT_IMAGES = {
       ].join(" ");
       brushEl.style.opacity = alpha.toFixed(3);
 
-      if (!svgHidden && (t >= BRUSH_PICKUP_END || isCoarsePointerDevice())) {
+      const svgHideT = coarse ? BRUSH_SWEEP_END * 0.72 : BRUSH_PICKUP_END;
+      if (!svgHidden && t >= svgHideT) {
         cellEl.classList.add("is-gone");
         svgHidden = true;
       }
