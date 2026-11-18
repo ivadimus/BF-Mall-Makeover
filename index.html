@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <!-- Opened from the iPhone Home Screen it runs full screen, without Safari bars. -->
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -274,6 +277,23 @@ body {
   padding: 6px 12px;
   font-size: 11px;
   opacity: 0.85;
+}
+
+/* Confirms which build loaded (mobile bare / PWA cache check). */
+.build-stamp {
+  display: none;
+  position: fixed;
+  left: calc(env(safe-area-inset-left, 0px) + 6px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 6px);
+  z-index: 300;
+  font: 10px/1.2 system-ui, -apple-system, Segoe UI, sans-serif;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.45);
+  pointer-events: none;
+  user-select: none;
+}
+.is-bare .build-stamp {
+  display: block;
 }
 
 /* iOS often drops backdrop-filter under canvas VFX — solid plate reads more stable. */
@@ -1666,6 +1686,7 @@ html:not(.is-bare).web-cursor-pressed .device * {
   </style>
 </head>
 <body>
+  <div class="build-stamp" id="build-stamp" aria-hidden="true"></div>
   <div class="rotate-hint" aria-live="polite">
     <div class="rotate-hint-phone" aria-hidden="true"></div>
     <div>Поверните телефон горизонтально</div>
@@ -2211,6 +2232,14 @@ window.RESULT_IMAGES = {
 (function () {
   "use strict";
 
+  (function setBuildStamp() {
+    const el = document.getElementById("build-stamp");
+    if (el) el.textContent = PROTOTYPE_BUILD;
+    if (typeof console !== "undefined" && console.info) {
+      console.info("[Mall Makeover] build", PROTOTYPE_BUILD);
+    }
+  })();
+
   /** Wall-clock length of one brush clean (pick-up + sweeping + lift-off). */
   const WIPE_MS = 540;
   /** Timeline, as parts of WIPE_MS. */
@@ -2240,8 +2269,12 @@ window.RESULT_IMAGES = {
   const BRUSH_MAX_SWEEPS = 3;
   const ENABLE_SCENE_SPOTLIGHTS = false;
 
+  const PROTOTYPE_BUILD = "wipe-f69b378";
+
   /** Phones / tablets: lighter canvas load but keep a soft wipe look. */
   function isCoarsePointerDevice() {
+    const root = document.documentElement;
+    if (root.classList.contains("is-bare")) return true;
     if (typeof matchMedia === "undefined") return false;
     return (
       (navigator.maxTouchPoints && navigator.maxTouchPoints > 0) ||
