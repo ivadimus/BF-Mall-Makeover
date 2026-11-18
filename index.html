@@ -2232,7 +2232,7 @@ window.RESULT_IMAGES = {
 (function () {
   "use strict";
 
-  const PROTOTYPE_BUILD = "wipe-soft-mobile2";
+  const PROTOTYPE_BUILD = "splash-dust3";
 
   /** Wall-clock length of one brush clean (pick-up + sweeping + lift-off). */
   const WIPE_MS = 540;
@@ -5620,18 +5620,21 @@ window.RESULT_IMAGES = {
     sg.fillRect(0, 0, R * 2, R * 2);
 
     const puffs = [];
-    let lastSweepPuffAt = 0;
+    const splashDustMul = isCoarsePointerDevice() ? 1.25 : 1.45;
+  let lastSweepPuffAt = 0;
     function spawnPuffs(x, y, n, spread) {
-      for (let i = 0; i < n; i++) {
+      const count = Math.max(1, Math.round(n * splashDustMul));
+      const puffSpread = spread * (0.92 + splashDustMul * 0.12);
+      for (let i = 0; i < count; i++) {
         puffs.push({
-          x: x + rand(-spread, spread),
-          y: y + rand(-spread * 0.45, spread * 0.45),
-          vx: rand(-26, 26),
-          vy: rand(-48, -8),
-          r: rand(14, 32),
-          grow: rand(22, 48),
+          x: x + rand(-puffSpread, puffSpread),
+          y: y + rand(-puffSpread * 0.5, puffSpread * 0.5),
+          vx: rand(-36, 36) * splashDustMul,
+          vy: rand(-62, -10) * splashDustMul,
+          r: rand(18, 38) * splashDustMul,
+          grow: rand(28, 58) * splashDustMul,
           age: 0,
-          life: rand(0.45, 0.85),
+          life: rand(0.5, 1.05),
           tint: Math.random() < 0.5 ? "232,232,238" : "205,205,214",
         });
       }
@@ -5642,6 +5645,9 @@ window.RESULT_IMAGES = {
     let last = t0;
     let prev = null;
     let finished = false;
+    let lastExitPuffAt = 0;
+    const sweepPuffGapMs = isCoarsePointerDevice() ? 52 : 44;
+    const sweepPuffsPer = isCoarsePointerDevice() ? 3 : 4;
 
     function broomAt(t) {
       const i = Math.min(SWEEP_PASSES.length - 1, Math.floor(t / SWEEP_PASS_MS));
@@ -5677,17 +5683,42 @@ window.RESULT_IMAGES = {
           const dy = cy - prev.y;
           const steps = Math.max(1, Math.ceil(Math.hypot(dx, dy) / 18));
           for (let s = 1; s <= steps; s++) {
-            pctx.drawImage(stamp, prev.x + (dx * s) / steps - R, prev.y + (dy * s) / steps - R);
+            const sx = prev.x + (dx * s) / steps;
+            const sy = prev.y + (dy * s) / steps;
+            pctx.drawImage(stamp, sx - R, sy - R);
+            if (s === steps || (s % 2 === 0 && Math.random() < 0.42)) {
+              spawnPuffs(
+                sx - pos.dir * 40,
+                sy + rand(18, 42),
+                1,
+                28
+              );
+            }
           }
         } else {
           pctx.drawImage(stamp, cx - R, cy - R);
+          spawnPuffs(cx - pos.dir * 50, cy + 28, 4, 48);
         }
         pctx.globalCompositeOperation = "source-over";
         prev = { x: cx, y: cy };
-        if (now - lastSweepPuffAt > 95) {
+        if (now - lastSweepPuffAt > sweepPuffGapMs) {
           lastSweepPuffAt = now;
-          spawnPuffs(pos.x - pos.dir * 55, pos.y + 36, 1, 38);
+          spawnPuffs(pos.x - pos.dir * 70, pos.y + 40, sweepPuffsPer, 58);
         }
+        if (pos.u > 0.92 && now - lastSweepPuffAt < 40) {
+          spawnPuffs(pos.x - pos.dir * 55, pos.y + 32, 2, 44);
+        }
+      }
+
+      if (inBroomExit && now - lastExitPuffAt > 70) {
+        lastExitPuffAt = now;
+        const eu = (t - totalMs) / SPLASH_BROOM_EXIT_MS;
+        spawnPuffs(
+          pos.x - pos.dir * (30 + eu * 40),
+          pos.y + 50 - eu * 35,
+          2,
+          40
+        );
       }
 
       fctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -5704,7 +5735,11 @@ window.RESULT_IMAGES = {
         p.y += p.vy * dt;
         const u = p.age / p.life;
         const r = p.r + p.grow * u;
-        const a = 0.32 * (1 - u) * Math.min(1, p.age / 0.08);
+        const a =
+          0.46 *
+          splashDustMul *
+          (1 - u) *
+          Math.min(1, p.age / 0.08);
         const g = fctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
         g.addColorStop(0, `rgba(${p.tint},${a.toFixed(3)})`);
         g.addColorStop(0.6, `rgba(${p.tint},${(a * 0.6).toFixed(3)})`);
