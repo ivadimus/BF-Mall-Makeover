@@ -2296,6 +2296,14 @@ window.RESULT_IMAGES = {
     };
   }
 
+  function splashCanvasScale(width, height) {
+    if (!isCoarsePointerDevice()) {
+      return Math.min(3, Math.max(1, stageScale() * (window.devicePixelRatio || 1)));
+    }
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    return Math.min(1.15, Math.max(0.85, stageScale() * dpr));
+  }
+
   const FEATHER = 36;
   /** Blur radius of the soft fade where a piece meets its neighbour. */
   const EDGE_FADE = 18;
@@ -3612,41 +3620,38 @@ window.RESULT_IMAGES = {
    * so the wipe never flashes hard polygon edges.
    */
   function buildSoftCellMask(width, height, polygon) {
-    const coarse = isCoarsePointerDevice() && width * height > 350000;
-    const scale = coarse ? 0.5 : 1;
-    const w = Math.max(1, Math.round(width * scale));
-    const h = Math.max(1, Math.round(height * scale));
-    const poly =
-      scale === 1
-        ? polygon
-        : polygon.map((p) => ({ x: p.x * scale, y: p.y * scale }));
-
     const soft = document.createElement("canvas");
-    soft.width = w;
-    soft.height = h;
+    soft.width = width;
+    soft.height = height;
     const sctx = soft.getContext("2d");
 
     const outline = organicCellPath(
-      VoronoiReveal.expandPolygon(poly, FEATHER * scale),
-      CORNER_RADIUS * scale,
-      EDGE_WAVE * scale
+      VoronoiReveal.expandPolygon(polygon, FEATHER),
+      CORNER_RADIUS,
+      EDGE_WAVE
     );
     const path = new Path2D(outline);
 
-    const edgeBlur = EDGE_FADE * scale;
-    sctx.filter = edgeBlur > 0 ? `blur(${edgeBlur}px)` : "none";
-    sctx.fillStyle = "#fff";
-    sctx.fill(path);
-    sctx.filter = "none";
+    if (canvasFilterWorks()) {
+      sctx.filter = `blur(${EDGE_FADE}px)`;
+      sctx.fillStyle = "#fff";
+      sctx.fill(path);
+      sctx.filter = "none";
+    } else {
+      // Same blur without ctx.filter: draw the shape far outside the canvas and let its
+      // shadow (offset back into view) land on it. Canvas shadowBlur = 2 Ã— sigma.
+      const off = width + height + Math.ceil(EDGE_FADE * 8) + 64;
+      sctx.save();
+      sctx.translate(-off, 0);
+      sctx.shadowColor = "#fff";
+      sctx.shadowBlur = EDGE_FADE * 2;
+      sctx.shadowOffsetX = off;
+      sctx.fillStyle = "#fff";
+      sctx.fill(path);
+      sctx.restore();
+    }
 
-    if (scale === 1) return soft;
-
-    const full = document.createElement("canvas");
-    full.width = width;
-    full.height = height;
-    const fctx = full.getContext("2d");
-    fctx.drawImage(soft, 0, 0, w, h, 0, 0, width, height);
-    return full;
+    return soft;
   }
 
   function pointInPolygon(point, polygon) {
@@ -3862,7 +3867,7 @@ window.RESULT_IMAGES = {
   }
 
   /**
-   * Brush position at sweep progress s (0–1) along the planned route:
+   * Brush position at sweep progress s (0â€“1) along the planned route:
    * side-to-side sweeps that slow down at each turn like a flick of the
    * wrist, staying inside the piece. dir = +1 sweeping right, -1 left.
    */
@@ -3995,7 +4000,6 @@ window.RESULT_IMAGES = {
 
     const width = layoutWidth;
     const height = layoutHeight;
-    const tune = brushWipeTuning();
     const softEdge = buildSoftCellMask(width, height, polygon);
     const bbox = polygonBBox(polygon);
     const centre = cellIconSpots.get(cellId) || null;
@@ -4007,25 +4011,6 @@ window.RESULT_IMAGES = {
     canvas.className = "brush-wipe-canvas";
     vfxLayer.appendChild(canvas);
     const ctx = canvas.getContext("2d");
-
-    const pieceBase = document.createElement("canvas");
-    pieceBase.width = width;
-    pieceBase.height = height;
-    const pieceBaseCtx = pieceBase.getContext("2d");
-    drawImageCover(pieceBaseCtx, stateAImage, 0, 0, width, height);
-    pieceBaseCtx.globalCompositeOperation = "destination-in";
-    pieceBaseCtx.drawImage(softEdge, 0, 0);
-
-    const sweptBlur = document.createElement("canvas");
-    sweptBlur.width = width;
-    sweptBlur.height = height;
-    const sweptBlurCtx = sweptBlur.getContext("2d");
-    let sweptBlurStale = true;
-
-    const dissolveBlit = document.createElement("canvas");
-    dissolveBlit.width = width;
-    dissolveBlit.height = height;
-    let dissolveBlitP = -1;
 
     const fxLayer = document.createElement("div");
     fxLayer.className = "brush-fx";
@@ -4070,7 +4055,7 @@ window.RESULT_IMAGES = {
           x1: header.x + header.w,
           minTipY: header.y + header.h + BRUSH_HEADER_GAP_PX + tipY,
         };
-        // Extra room for the brush leaning up to ~22° while it sweeps.
+        // Extra room for the brush leaning up to ~22Â° while it sweeps.
         const lean = brushH * 0.4;
         headerSideX.side = startTip.x < header.x + header.w / 2 ? -1 : 1;
         area.headerBlock = {
@@ -4119,7 +4104,7 @@ window.RESULT_IMAGES = {
     // The bristles leave a wide, flat trail.
     const stampW = stampRadius * 2.5;
     const stampH = stampRadius * 1.7;
-    const stampStep = stampRadius * tune.stampStepMul;
+    const stampStep = stampRadius * 0.3;
     // The route starts exactly where the icon brush stood.
     const plan = planBrushPath(polygon, area, startTip, stampRadius);
 
@@ -4138,7 +4123,7 @@ window.RESULT_IMAGES = {
       );
     }
 
-    /** Sweep progress (0–1) inside the sweeping part of the timeline. */
+    /** Sweep progress (0â€“1) inside the sweeping part of the timeline. */
     function sweepProgress(t) {
       return Math.min(
         1,
@@ -4170,18 +4155,16 @@ window.RESULT_IMAGES = {
         const p = brushPathPoint(polygon, area, fromS + (toS - fromS) * (i / steps), plan);
         sweptCtx.drawImage(stamp, p.x - stampW / 2, p.y - stampH / 2, stampW, stampH);
       }
-      sweptBlurStale = true;
       return b;
     }
 
     /** Dust clouds kicked up ahead of the bristles, drifting the way the brush moves. */
     function emitPuffs(p) {
       const now = performance.now();
-      if (now - lastPuffAt < tune.puffGap) return;
+      if (now - lastPuffAt < 28) return;
       lastPuffAt = now;
       const atTurn = p.turn > 0.85;
-      let count = atTurn ? 4 : 2 + (Math.random() < 0.65 ? 1 : 0);
-      count = Math.max(1, Math.round(count * tune.puffCountMul));
+      const count = atTurn ? 4 : 2 + (Math.random() < 0.65 ? 1 : 0);
       for (let i = 0; i < count; i++) {
         const ahead = p.dir * (stampRadius * (0.5 + Math.random() * 0.7));
         const spreadY = (Math.random() - 0.5) * stampRadius * 1.5;
@@ -4204,27 +4187,16 @@ window.RESULT_IMAGES = {
       ctx.globalCompositeOperation = "source-over";
       ctx.clearRect(0, 0, width, height);
 
-      ctx.drawImage(pieceBase, 0, 0);
-
-      if (sweptBlurStale) {
-        sweptBlurCtx.setTransform(1, 0, 0, 1, 0, 0);
-        sweptBlurCtx.clearRect(0, 0, width, height);
-        const blurPx = tune.trailBlur;
-        if (blurPx > 0) {
-          sweptBlurCtx.filter = `blur(${blurPx}px)`;
-          sweptBlurCtx.drawImage(swept, 0, 0);
-          sweptBlurCtx.filter = "none";
-        } else {
-          sweptBlurCtx.drawImage(swept, 0, 0);
-        }
-        sweptBlurStale = false;
-      }
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.drawImage(sweptBlur, 0, 0);
-      // Keep the piece’s outer feather even when the eraser bites the edge.
+      drawImageCover(ctx, stateAImage, 0, 0, width, height);
       ctx.globalCompositeOperation = "destination-in";
       ctx.drawImage(softEdge, 0, 0);
-      ctx.globalCompositeOperation = "source-over";
+
+      ctx.globalCompositeOperation = "destination-out";
+      if (BRUSH_TRAIL_BLEND_BLUR_PX > 0) {
+        ctx.filter = `blur(${BRUSH_TRAIL_BLEND_BLUR_PX}px)`;
+      }
+      ctx.drawImage(swept, 0, 0);
+      ctx.filter = "none";
 
       const endP = endDissolveProgress(t);
       if (endP > 0) {
@@ -4236,24 +4208,7 @@ window.RESULT_IMAGES = {
         }
         if (dissolve) {
           try {
-            const dissolveStep = tune.dissolveStep;
-            if (
-              dissolveBlitP < 0 ||
-              endP >= 1 ||
-              endP - dissolveBlitP >= dissolveStep
-            ) {
-              const dctx = dissolveBlit.getContext("2d");
-              dctx.setTransform(1, 0, 0, 1, 0, 0);
-              dctx.clearRect(0, 0, width, height);
-              dctx.globalCompositeOperation = "destination-out";
-              drawDissolveHole(dctx, dissolve, endP);
-              dissolveBlitP = endP;
-            }
-            ctx.globalCompositeOperation = "destination-out";
-            ctx.drawImage(dissolveBlit, 0, 0);
-            ctx.globalCompositeOperation = "destination-in";
-            ctx.drawImage(softEdge, 0, 0);
-            ctx.globalCompositeOperation = "source-over";
+            drawDissolveHole(ctx, dissolve, endP);
           } catch (err) {
             console.warn("Dissolve draw failed:", err);
             dissolveFailed = true;
@@ -4267,6 +4222,8 @@ window.RESULT_IMAGES = {
         }
       }
       ctx.globalCompositeOperation = "source-over";
+
+      redrawDust(softEdge);
 
       // Brush sprite: pick-up from the icon, sweep, then lift off.
       let bx;
@@ -5327,6 +5284,7 @@ window.RESULT_IMAGES = {
     const img = document.getElementById("splash-img");
     const rand = (a, b) => a + Math.random() * (b - a);
 
+    // 1) The start picture painted on a canvas we can erase (same crop as the <img>).
     const pic = document.createElement("canvas");
     pic.className = "splash-canvas";
     pic.width = Math.round(width * k);
@@ -5341,8 +5299,9 @@ window.RESULT_IMAGES = {
     }
     splash.insertBefore(pic, splash.firstChild);
     if (img) img.style.visibility = "hidden";
-    splash.style.background = "transparent";
+    splash.style.background = "transparent"; // the scene shows through where the picture is gone
 
+    // 2) Broom + dust canvas, on top.
     const fx = document.createElement("canvas");
     fx.className = "splash-fx";
     fx.width = pic.width;
@@ -5350,6 +5309,7 @@ window.RESULT_IMAGES = {
     const fctx = fx.getContext("2d");
     splash.appendChild(fx);
 
+    // Soft round eraser: solid in the middle, fading out towards the rim.
     const R = SWEEP_RADIUS;
     const stamp = document.createElement("canvas");
     stamp.width = stamp.height = R * 2;
@@ -5362,22 +5322,17 @@ window.RESULT_IMAGES = {
     sg.fillRect(0, 0, R * 2, R * 2);
 
     const puffs = [];
-    const splashDustMul =
-      (isCoarsePointerDevice() ? 1.25 : 1.45) * (isIosWebKit() ? 1.22 : 1);
-    let lastSweepPuffAt = 0;
     function spawnPuffs(x, y, n, spread) {
-      const count = Math.max(1, Math.round(n * splashDustMul));
-      const puffSpread = spread * (0.92 + splashDustMul * 0.12);
-      for (let i = 0; i < count; i++) {
+      for (let i = 0; i < n; i++) {
         puffs.push({
-          x: x + rand(-puffSpread, puffSpread),
-          y: y + rand(-puffSpread * 0.5, puffSpread * 0.5),
-          vx: rand(-36, 36) * splashDustMul,
-          vy: rand(-62, -10) * splashDustMul,
-          r: rand(18, 38) * splashDustMul,
-          grow: rand(28, 58) * splashDustMul,
+          x: x + rand(-spread, spread),
+          y: y + rand(-spread * 0.6, spread * 0.6),
+          vx: rand(-40, 40),
+          vy: rand(-70, -10),
+          r: rand(26, 56),
+          grow: rand(40, 90),
           age: 0,
-          life: rand(0.5, 1.05),
+          life: rand(0.7, 1.15),
           tint: Math.random() < 0.5 ? "232,232,238" : "205,205,214",
         });
       }
@@ -5388,23 +5343,12 @@ window.RESULT_IMAGES = {
     let last = t0;
     let prev = null;
     let finished = false;
-    let lastExitPuffAt = 0;
-    const sweepPuffGapMs = isCoarsePointerDevice()
-      ? isIosWebKit()
-        ? 46
-        : 52
-      : 44;
-    const sweepPuffsPer = isCoarsePointerDevice()
-      ? isIosWebKit()
-        ? 4
-        : 3
-      : 4;
 
     function broomAt(t) {
       const i = Math.min(SWEEP_PASSES.length - 1, Math.floor(t / SWEEP_PASS_MS));
       const pass = SWEEP_PASSES[i];
       const u = Math.min(1, (t - i * SWEEP_PASS_MS) / SWEEP_PASS_MS);
-      const e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+      const e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2; // ease in-out
       const from = pass.dir > 0 ? -110 : width + 110;
       const to = pass.dir > 0 ? width + 110 : -110;
       return {
@@ -5418,14 +5362,13 @@ window.RESULT_IMAGES = {
     function frame(now) {
       const dt = Math.min(0.034, (now - last) / 1000);
       last = now;
+      // (the first animation-frame timestamp can be a hair earlier than t0)
       const t = Math.max(0, now - t0);
-      const inSweep = t < totalMs;
-      const inBroomExit =
-        t >= totalMs && t < totalMs + SPLASH_BROOM_EXIT_MS;
-      const broomGone = t >= totalMs + SPLASH_BROOM_EXIT_MS;
+      const swept = t < totalMs;
       const pos = broomAt(Math.min(t, totalMs - 1));
 
-      if (inSweep) {
+      // Erase along the path, slightly behind the bristles.
+      if (swept) {
         const cx = pos.x - pos.dir * 55;
         const cy = pos.y;
         pctx.globalCompositeOperation = "destination-out";
@@ -5434,44 +5377,17 @@ window.RESULT_IMAGES = {
           const dy = cy - prev.y;
           const steps = Math.max(1, Math.ceil(Math.hypot(dx, dy) / 18));
           for (let s = 1; s <= steps; s++) {
-            const sx = prev.x + (dx * s) / steps;
-            const sy = prev.y + (dy * s) / steps;
-            pctx.drawImage(stamp, sx - R, sy - R);
-            if (s === steps || (s % 2 === 0 && Math.random() < 0.42)) {
-              spawnPuffs(
-                sx - pos.dir * 40,
-                sy + rand(18, 42),
-                1,
-                28
-              );
-            }
+            pctx.drawImage(stamp, prev.x + (dx * s) / steps - R, prev.y + (dy * s) / steps - R);
           }
         } else {
           pctx.drawImage(stamp, cx - R, cy - R);
-          spawnPuffs(cx - pos.dir * 50, cy + 28, 4, 48);
         }
         pctx.globalCompositeOperation = "source-over";
         prev = { x: cx, y: cy };
-        if (now - lastSweepPuffAt > sweepPuffGapMs) {
-          lastSweepPuffAt = now;
-          spawnPuffs(pos.x - pos.dir * 70, pos.y + 40, sweepPuffsPer, 58);
-        }
-        if (pos.u > 0.92 && now - lastSweepPuffAt < 40) {
-          spawnPuffs(pos.x - pos.dir * 55, pos.y + 32, 2, 44);
-        }
+        spawnPuffs(pos.x - pos.dir * 70, pos.y + 40, 3, 55);
       }
 
-      if (inBroomExit && now - lastExitPuffAt > 70) {
-        lastExitPuffAt = now;
-        const eu = (t - totalMs) / SPLASH_BROOM_EXIT_MS;
-        spawnPuffs(
-          pos.x - pos.dir * (30 + eu * 40),
-          pos.y + 50 - eu * 35,
-          2,
-          40
-        );
-      }
-
+      // Dust and broom.
       fctx.setTransform(1, 0, 0, 1, 0, 0);
       fctx.clearRect(0, 0, fx.width, fx.height);
       fctx.setTransform(k, 0, 0, k, 0, 0);
@@ -5486,11 +5402,7 @@ window.RESULT_IMAGES = {
         p.y += p.vy * dt;
         const u = p.age / p.life;
         const r = p.r + p.grow * u;
-        const a =
-          0.46 *
-          splashDustMul *
-          (1 - u) *
-          Math.min(1, p.age / 0.08);
+        const a = 0.55 * (1 - u) * Math.min(1, p.age / 0.08);
         const g = fctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
         g.addColorStop(0, `rgba(${p.tint},${a.toFixed(3)})`);
         g.addColorStop(0.6, `rgba(${p.tint},${(a * 0.6).toFixed(3)})`);
@@ -5498,50 +5410,18 @@ window.RESULT_IMAGES = {
         fctx.fillStyle = g;
         fctx.fillRect(p.x - r, p.y - r, r * 2, r * 2);
       }
-
-      if (
-        (inSweep || inBroomExit) &&
-        brushImage.complete &&
-        brushImage.naturalWidth > 0
-      ) {
+      if (swept && brushImage.complete && brushImage.naturalWidth > 0) {
         const bw = SWEEP_BROOM_W;
         const bh = (bw * brushImage.naturalHeight) / brushImage.naturalWidth;
-        const lastPass = broomAt(totalMs - 1);
-        let bx;
-        let by;
-        let dir;
-        let tilt;
-        let alpha = 1;
-        if (inSweep) {
-          bx = pos.x;
-          by = pos.y + 40;
-          dir = pos.dir;
-          tilt = -0.1 + Math.sin(pos.u * Math.PI * 6) * 0.06;
-        } else {
-          const eu = (t - totalMs) / SPLASH_BROOM_EXIT_MS;
-          const ease = smoothstep(eu);
-          bx = lastPass.x + lastPass.dir * (24 + ease * 72);
-          by = lastPass.y + 40 - ease * 95;
-          dir = lastPass.dir;
-          tilt = -0.1 - ease * 0.35;
-          alpha = 1 - ease;
-        }
         fctx.save();
-        fctx.globalAlpha = alpha;
-        fctx.translate(bx, by);
-        fctx.scale(dir, 1);
-        fctx.rotate(tilt);
-        fctx.drawImage(
-          brushImage,
-          -bw * SWEEP_BROOM_TIP.x,
-          -bh * SWEEP_BROOM_TIP.y,
-          bw,
-          bh
-        );
+        fctx.translate(pos.x, pos.y + 70);
+        fctx.scale(pos.dir, 1); // the dust trails behind the broom on every pass
+        fctx.rotate(-0.1 + Math.sin(pos.u * Math.PI * 6) * 0.06);
+        fctx.drawImage(brushImage, -bw * SWEEP_BROOM_TIP.x, -bh * SWEEP_BROOM_TIP.y, bw, bh);
         fctx.restore();
       }
 
-      if (broomGone && !puffs.length) {
+      if (!swept && !puffs.length) {
         finish();
         return;
       }
@@ -5560,10 +5440,8 @@ window.RESULT_IMAGES = {
     }
 
     requestAnimationFrame(frame);
-    window.setTimeout(
-      finish,
-      totalMs + SPLASH_BROOM_EXIT_MS + 2800
-    );
+    // Safety net: never leave the start screen stuck.
+    window.setTimeout(finish, totalMs + 2500);
   }
 
   function init() {
