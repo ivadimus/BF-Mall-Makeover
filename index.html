@@ -1649,9 +1649,54 @@ body {
   .rotate-hint-phone { animation: none; transform: rotate(-90deg); }
 }
 
+/* Desktop web demo: large finger cursor (phone-chrome preview only). */
+html:not(.is-bare) body {
+  cursor: none;
+}
+
+.web-tap-hand {
+  display: none;
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 220px;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+  z-index: 100001;
+  transform: translate(-42%, -38%);
+  transform-origin: 72% 88%;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.45));
+  user-select: none;
+  -webkit-user-drag: none;
+  visibility: hidden;
+  transition: scale 0.08s ease;
+}
+
+html:not(.is-bare) .web-tap-hand {
+  display: block;
+}
+
+html:not(.is-bare) .web-tap-hand.is-active {
+  visibility: visible;
+}
+
+html:not(.is-bare) .web-tap-hand.is-pressed {
+  scale: 0.94;
+}
+
   </style>
 </head>
 <body>
+  <img
+    class="web-tap-hand"
+    id="web-tap-hand"
+    src="assets/paletz.png"
+    alt=""
+    draggable="false"
+    aria-hidden="true"
+  />
   <div class="rotate-hint" aria-live="polite">
     <div class="rotate-hint-phone" aria-hidden="true"></div>
     <div>Поверните телефон горизонтально</div>
