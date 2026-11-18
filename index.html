@@ -519,6 +519,19 @@ body {
   visibility: hidden;
 }
 
+.voronoi-layer .cell.is-wiping {
+  pointer-events: none;
+}
+
+html.is-bare .voronoi-layer {
+  position: absolute;
+  z-index: 3;
+}
+
+html.is-bare .vfx-layer {
+  z-index: 6;
+}
+
 /* Sam in the far bottom-left corner; both faces share one box so the swap
    keeps the exact same position and size. */
 .sam {
@@ -2240,7 +2253,7 @@ window.RESULT_IMAGES = {
 (function () {
   "use strict";
 
-  const PROTOTYPE_BUILD = "ios-chrome4";
+  const PROTOTYPE_BUILD = "wipe-ios5";
 
   function isIosWebKit() {
     const ua = navigator.userAgent || "";
@@ -2299,7 +2312,8 @@ window.RESULT_IMAGES = {
       stampBlurMul: coarse ? (ios ? 1.48 : 1.4) : 1,
       stampStretchW: coarse ? 1.34 : 1,
       stampStretchH: coarse ? 1.2 : 1,
-      trailBlur: coarse ? (ios ? 9.5 : 8) : BRUSH_TRAIL_BLEND_BLUR_PX,
+      trailBlur: coarse ? 0 : BRUSH_TRAIL_BLEND_BLUR_PX,
+      skipSweptBlurPass: coarse,
       compositeCleanUnder: coarse,
       dissolveStep: coarse ? 0.12 : 0.04,
       dissolveSampleMax: coarse ? 96 : null,
@@ -2477,6 +2491,9 @@ window.RESULT_IMAGES = {
   const cellPolygons = new Map();
   /** Where each piece's number sits — the sponge starts scrubbing right there. */
   const cellIconSpots = new Map();
+  /** Pre-rasterized soft masks (mobile) so a tap does not rebuild organic paths. */
+  const cellWipeMaskCache = new Map();
+  let cellWipeMaskLayoutKey = "";
 
   /** Full-stage dust + spider-web overlay; punched out as pieces clear. */
   let dustCanvas = null;
@@ -3126,6 +3143,8 @@ window.RESULT_IMAGES = {
     vfxLayer.innerHTML = "";
     cellPolygons.clear();
     cellIconSpots.clear();
+    cellWipeMaskCache.clear();
+    cellWipeMaskLayoutKey = "";
     clearedDustMasks.length = 0;
     if (dustCanvas) {
       dustCanvas.remove();
@@ -3599,6 +3618,8 @@ window.RESULT_IMAGES = {
     // Dust/dirt overlay disabled.
     // ensureDustLayer(width, height);
 
+    warmCellWipeMasks(width, height);
+
     if (firstSceneIntroPending) {
       syncPeaksIntroHidden();
     } else {
@@ -3710,6 +3731,41 @@ window.RESULT_IMAGES = {
     sctx.filter = "none";
 
     return soft;
+  }
+
+  function warmCellWipeMasks(width, height) {
+    if (!isCoarsePointerDevice()) return;
+    const scale = isIosWebKit() ? 0.54 : 0.5;
+    const key = `${width}x${height}@${scale}`;
+    if (key === cellWipeMaskLayoutKey && cellWipeMaskCache.size >= cellPolygons.size) {
+      return;
+    }
+    cellWipeMaskLayoutKey = key;
+    cellWipeMaskCache.clear();
+    const mw = Math.max(1, Math.round(width * scale));
+    const mh = Math.max(1, Math.round(height * scale));
+    const ids = [...cellPolygons.keys()];
+    let idx = 0;
+    function buildChunk() {
+      const t0 = performance.now();
+      while (idx < ids.length && performance.now() - t0 < 10) {
+        const id = ids[idx++];
+        const poly = cellPolygons.get(id);
+        if (!poly) continue;
+        cellWipeMaskCache.set(id, {
+          canvas: buildSoftCellMask(width, height, poly, mw, mh, {
+            matchSvg: true,
+            maskEdgeBoost: true,
+          }),
+          scale,
+        });
+      }
+      if (idx < ids.length) {
+        const ric = window.requestIdleCallback || ((fn) => setTimeout(fn, 12));
+        ric(buildChunk, { timeout: 300 });
+      }
+    }
+    buildChunk();
   }
 
   function pointInPolygon(point, polygon) {
@@ -4117,17 +4173,22 @@ window.RESULT_IMAGES = {
       ih = Math.max(1, Math.round(cropH * rs));
     }
     const coarse = isCoarsePointerDevice();
-    const maskSceneScale = coarse
-      ? Math.min(1, Math.max(rs, Math.max(cropW / width, cropH / height) * rs * 1.08))
-      : 1;
-    const softEdgeFull = buildSoftCellMask(
-      width,
-      height,
-      polygon,
-      coarse ? Math.max(1, Math.round(width * maskSceneScale)) : undefined,
-      coarse ? Math.max(1, Math.round(height * maskSceneScale)) : undefined,
-      { matchSvg: true, maskEdgeBoost: tune.maskEdgeBoost }
-    );
+    const maskCached = cellWipeMaskCache.get(cellId);
+    const maskSceneScale = maskCached
+      ? maskCached.scale
+      : coarse
+        ? Math.min(1, Math.max(rs, Math.max(cropW / width, cropH / height) * rs * 1.08))
+        : 1;
+    const softEdgeFull =
+      maskCached?.canvas ||
+      buildSoftCellMask(
+        width,
+        height,
+        polygon,
+        coarse ? Math.max(1, Math.round(width * maskSceneScale)) : undefined,
+        coarse ? Math.max(1, Math.round(height * maskSceneScale)) : undefined,
+        { matchSvg: true, maskEdgeBoost: tune.maskEdgeBoost }
+      );
     const softEdge = document.createElement("canvas");
     softEdge.width = iw;
     softEdge.height = ih;
@@ -4209,11 +4270,15 @@ window.RESULT_IMAGES = {
       }
     }
 
-    const sweptBlur = document.createElement("canvas");
-    sweptBlur.width = iw;
-    sweptBlur.height = ih;
-    const sweptBlurCtx = sweptBlur.getContext("2d", canvasOpts);
+    let sweptBlur = null;
+    let sweptBlurCtx = null;
     let sweptBlurStale = true;
+    if (!tune.skipSweptBlurPass) {
+      sweptBlur = document.createElement("canvas");
+      sweptBlur.width = iw;
+      sweptBlur.height = ih;
+      sweptBlurCtx = sweptBlur.getContext("2d", canvasOpts);
+    }
 
     const dissolveBlit = document.createElement("canvas");
     dissolveBlit.width = iw;
@@ -4223,6 +4288,7 @@ window.RESULT_IMAGES = {
     const fxLayer = document.createElement("div");
     fxLayer.className = "brush-fx";
     vfxLayer.appendChild(fxLayer);
+    cellEl.classList.add("is-wiping");
 
     const aspect =
       brushImage.naturalWidth > 0 ? brushImage.naturalHeight / brushImage.naturalWidth : 1;
@@ -4346,6 +4412,8 @@ window.RESULT_IMAGES = {
       finished = true;
       cancelAnimationFrame(rafId);
       document.documentElement.classList.remove("is-wipe-active");
+      cellEl.classList.remove("is-wiping");
+      cellEl.classList.add("is-gone");
       canvas.remove();
       fxLayer.remove();
       commitDustHole(
@@ -4438,20 +4506,21 @@ window.RESULT_IMAGES = {
       ctx.drawImage(pieceBase, 0, 0);
 
       if (sweptBlurStale) {
-        sweptBlurCtx.setTransform(1, 0, 0, 1, 0, 0);
-        sweptBlurCtx.clearRect(0, 0, iw, ih);
-        const blurPx = tune.trailBlur;
-        if (blurPx > 0) {
-          sweptBlurCtx.filter = `blur(${blurPx}px)`;
+        if (sweptBlurCtx && tune.trailBlur > 0) {
+          sweptBlurCtx.setTransform(1, 0, 0, 1, 0, 0);
+          sweptBlurCtx.clearRect(0, 0, iw, ih);
+          sweptBlurCtx.filter = `blur(${tune.trailBlur}px)`;
           sweptBlurCtx.drawImage(swept, 0, 0);
           sweptBlurCtx.filter = "none";
-        } else {
-          sweptBlurCtx.drawImage(swept, 0, 0);
         }
         sweptBlurStale = false;
       }
       ctx.globalCompositeOperation = "destination-out";
-      ctx.drawImage(tune.trailBlur > 0 ? sweptBlur : swept, 0, 0);
+      ctx.drawImage(
+        sweptBlurCtx && tune.trailBlur > 0 ? sweptBlur : swept,
+        0,
+        0
+      );
       clipToSoftMask(ctx, "destination-in");
 
       const endP = endDissolveProgress(t);
@@ -4576,7 +4645,11 @@ window.RESULT_IMAGES = {
       ].join(" ");
       brushEl.style.opacity = alpha.toFixed(3);
 
-      if (!svgHidden && (t >= BRUSH_PICKUP_END || prevS > 0.002)) {
+      if (
+        !coarse &&
+        !svgHidden &&
+        (t >= BRUSH_PICKUP_END || prevS > 0.002)
+      ) {
         cellEl.classList.add("is-gone");
         svgHidden = true;
       }
