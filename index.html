@@ -2230,7 +2230,7 @@ window.RESULT_IMAGES = {
 (function () {
   "use strict";
 
-  const PROTOTYPE_BUILD = "wipe-nov17-base";
+  const PROTOTYPE_BUILD = "wipe-oct21-m";
 
   function isIosWebKit() {
     const ua = navigator.userAgent || "";
@@ -3561,7 +3561,15 @@ window.RESULT_IMAGES = {
       btn.dataset.cost = String(cost);
       btn.appendChild(iconLabel);
 
-      btn.addEventListener("click", (event) => onIconTap(cell.index, event));
+      const tapIcon = (event) => onIconTap(cell.index, event);
+      if (isCoarsePointerDevice()) {
+        btn.addEventListener("pointerup", (event) => {
+          if (event.pointerType === "mouse") return;
+          tapIcon(event);
+        });
+      } else {
+        btn.addEventListener("click", tapIcon);
+      }
       iconsLayer.appendChild(btn);
     });
 
@@ -3615,6 +3623,18 @@ window.RESULT_IMAGES = {
     return costs;
   }
 
+  /** Mobile Safari sometimes ignores ctx.filter — detect once. */
+  function canvasFilterWorks() {
+    try {
+      const probe = document.createElement("canvas").getContext("2d");
+      if (!probe || typeof probe.filter === "undefined") return false;
+      probe.filter = "blur(4px)";
+      return probe.filter.includes("blur");
+    } catch (_) {
+      return false;
+    }
+  }
+
   /**
    * Soft cell silhouette matching the SVG edge masks (feather + blur),
    * so the wipe never flashes hard polygon edges.
@@ -3632,10 +3652,22 @@ window.RESULT_IMAGES = {
     );
     const path = new Path2D(outline);
 
-    sctx.filter = `blur(${EDGE_FADE}px)`;
-    sctx.fillStyle = "#fff";
-    sctx.fill(path);
-    sctx.filter = "none";
+    if (canvasFilterWorks()) {
+      sctx.filter = `blur(${EDGE_FADE}px)`;
+      sctx.fillStyle = "#fff";
+      sctx.fill(path);
+      sctx.filter = "none";
+    } else {
+      const off = width + height + Math.ceil(EDGE_FADE * 8) + 64;
+      sctx.save();
+      sctx.translate(-off, 0);
+      sctx.shadowColor = "#fff";
+      sctx.shadowBlur = EDGE_FADE * 2;
+      sctx.shadowOffsetX = off;
+      sctx.fillStyle = "#fff";
+      sctx.fill(path);
+      sctx.restore();
+    }
 
     return soft;
   }
