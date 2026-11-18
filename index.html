@@ -622,6 +622,9 @@ body {
   .brush-wipe-canvas {
     contain: none;
   }
+  .voronoi-layer {
+    isolation: isolate;
+  }
 }
 
 .sponge-sparkles {
@@ -2229,7 +2232,7 @@ window.RESULT_IMAGES = {
 (function () {
   "use strict";
 
-  const PROTOTYPE_BUILD = "hotfix-black1";
+  const PROTOTYPE_BUILD = "wipe-soft-mobile2";
 
   /** Wall-clock length of one brush clean (pick-up + sweeping + lift-off). */
   const WIPE_MS = 540;
@@ -2275,27 +2278,38 @@ window.RESULT_IMAGES = {
   function brushWipeTuning() {
     const coarse = isCoarsePointerDevice();
     return {
-      renderScale: coarse ? 0.58 : 1,
-      stampStepMul: coarse ? 0.46 : 0.3,
-      trailBlur: coarse ? 0 : BRUSH_TRAIL_BLEND_BLUR_PX,
-      dissolveStep: coarse ? 0.14 : 0.04,
+      renderScale: coarse ? 0.62 : 1,
+      stampStepMul: coarse ? 0.4 : 0.3,
+      trailRadiusMul: coarse ? 1.45 : 1,
+      stampBlurMul: coarse ? 1.4 : 1,
+      stampStretchW: coarse ? 1.34 : 1,
+      stampStretchH: coarse ? 1.2 : 1,
+      trailBlur: coarse ? 8 : BRUSH_TRAIL_BLEND_BLUR_PX,
+      compositeCleanUnder: coarse,
+      dissolveStep: coarse ? 0.12 : 0.04,
       dissolveSampleMax: coarse ? 96 : null,
-      maxStampStepsPerFrame: coarse ? 22 : 0,
+      maxStampStepsPerFrame: coarse ? 24 : 0,
       maxSweepDeltaPerFrame: 0,
       frameMinMs: 0,
-      pixelBudget: coarse ? 92000 : 0,
-      puffGap: coarse ? 48 : 28,
-      puffCountMul: coarse ? 0 : 1,
+      pixelBudget: coarse ? 108000 : 0,
+      puffGap: coarse ? 16 : 28,
+      puffCountMul: coarse ? 1.15 : 1,
+      puffSizeMul: coarse ? 1.28 : 1,
       simpleDissolve: coarse,
+      maskEdgeBoost: coarse,
     };
   }
 
-  let spongeStampCache = null;
-  function getSpongeStamp() {
-    if (!spongeStampCache) {
-      spongeStampCache = buildSpongeStamp(BRUSH_TRAIL_RADIUS_PX);
+  const spongeStampCache = new Map();
+  function getSpongeStamp(tune) {
+    const t = tune || brushWipeTuning();
+    const radius = BRUSH_TRAIL_RADIUS_PX * (t.trailRadiusMul || 1);
+    const blurMul = t.stampBlurMul || 1;
+    const key = `${radius.toFixed(2)}|${blurMul.toFixed(2)}`;
+    if (!spongeStampCache.has(key)) {
+      spongeStampCache.set(key, buildSpongeStamp(radius, blurMul));
     }
-    return spongeStampCache;
+    return spongeStampCache.get(key);
   }
 
   function splashCanvasScale(width, height) {
@@ -3672,6 +3686,9 @@ window.RESULT_IMAGES = {
     if (matchSvg && rs < 1) {
       edgeBlur = Math.min(edgeBlur * 1.08, EDGE_FADE * rs * 1.5);
     }
+    if (opts && opts.maskEdgeBoost) {
+      edgeBlur = Math.min(EDGE_FADE * rs * 1.85, edgeBlur * 1.22);
+    }
     sctx.filter = edgeBlur > 0.35 ? `blur(${edgeBlur}px)` : "none";
     sctx.fillStyle = "#fff";
     sctx.fill(path);
@@ -3712,8 +3729,8 @@ window.RESULT_IMAGES = {
    * Soft, slightly mottled sponge footprint. Reused for every stamp so the
    * scrub trail keeps a spongy edge instead of a clean circle.
    */
-  function buildSpongeStamp(radius) {
-    const blur = BRUSH_TRAIL_BLUR_PX;
+  function buildSpongeStamp(radius, blurMul) {
+    const blur = BRUSH_TRAIL_BLUR_PX * (blurMul || 1);
     const pad = Math.ceil(blur * 2.5);
     const core = Math.max(8, Math.ceil(radius * 2));
     const size = core + pad * 2;
@@ -4094,7 +4111,7 @@ window.RESULT_IMAGES = {
       polygon,
       coarse ? Math.max(1, Math.round(width * maskSceneScale)) : undefined,
       coarse ? Math.max(1, Math.round(height * maskSceneScale)) : undefined,
-      { matchSvg: true }
+      { matchSvg: true, maskEdgeBoost: tune.maskEdgeBoost }
     );
     const softEdge = document.createElement("canvas");
     softEdge.width = iw;
@@ -4128,6 +4145,7 @@ window.RESULT_IMAGES = {
     canvas.style.width = `${cropW}px`;
     canvas.style.height = `${cropH}px`;
     vfxLayer.appendChild(canvas);
+    if (coarse) document.documentElement.classList.add("is-wipe-active");
     const ctx = canvas.getContext("2d", canvasOpts);
     if (ctx) {
       ctx.imageSmoothingEnabled = true;
@@ -4159,6 +4177,22 @@ window.RESULT_IMAGES = {
     pieceBaseCtx.setTransform(1, 0, 0, 1, 0, 0);
     pieceBaseCtx.globalCompositeOperation = "destination-in";
     pieceBaseCtx.drawImage(softEdge, 0, 0);
+
+    let pieceClean = null;
+    if (tune.compositeCleanUnder && stateBImg && stateBImg.naturalWidth > 0) {
+      pieceClean = document.createElement("canvas");
+      pieceClean.width = iw;
+      pieceClean.height = ih;
+      const pieceCleanCtx = pieceClean.getContext("2d", canvasOpts);
+      if (pieceCleanCtx) {
+        withLayoutScale(pieceCleanCtx, () => {
+          drawImageCover(pieceCleanCtx, stateBImg, -cropX, -cropY, width, height);
+        });
+        pieceCleanCtx.setTransform(1, 0, 0, 1, 0, 0);
+        pieceCleanCtx.globalCompositeOperation = "destination-in";
+        pieceCleanCtx.drawImage(softEdge, 0, 0);
+      }
+    }
 
     const sweptBlur = document.createElement("canvas");
     sweptBlur.width = iw;
@@ -4259,11 +4293,11 @@ window.RESULT_IMAGES = {
     let dissolveFailed = false;
     const dissolveBlitCtx = dissolveBlit.getContext("2d", canvasOpts);
 
-    const stampRadius = BRUSH_TRAIL_RADIUS_PX;
-    const stamp = getSpongeStamp();
+    const stampRadius = BRUSH_TRAIL_RADIUS_PX * (tune.trailRadiusMul || 1);
+    const stamp = getSpongeStamp(tune);
     // The bristles leave a wide, flat trail.
-    const stampW = stampRadius * 2.5;
-    const stampH = stampRadius * 1.7;
+    const stampW = stampRadius * 2.5 * (tune.stampStretchW || 1);
+    const stampH = stampRadius * 1.7 * (tune.stampStretchH || 1);
     const stampStep = stampRadius * tune.stampStepMul;
     // The route starts exactly where the icon brush stood.
     const plan = planBrushPath(polygon, area, startTip, stampRadius);
@@ -4296,6 +4330,7 @@ window.RESULT_IMAGES = {
       if (finished) return;
       finished = true;
       cancelAnimationFrame(rafId);
+      document.documentElement.classList.remove("is-wipe-active");
       canvas.remove();
       fxLayer.remove();
       commitDustHole(
@@ -4355,15 +4390,16 @@ window.RESULT_IMAGES = {
       if (now - lastPuffAt < tune.puffGap) return;
       lastPuffAt = now;
       const atTurn = p.turn > 0.85;
-      let count = atTurn ? 4 : 2 + (Math.random() < 0.65 ? 1 : 0);
+      let count = atTurn ? 5 : 3 + (Math.random() < 0.75 ? 1 : 0);
       count = Math.max(1, Math.round(count * tune.puffCountMul));
+      const puffScale = tune.puffSizeMul || 1;
       for (let i = 0; i < count; i++) {
         const ahead = p.dir * (stampRadius * (0.5 + Math.random() * 0.7));
         const spreadY = (Math.random() - 0.5) * stampRadius * 1.5;
         spawnDustPuff(fxLayer, p.x + ahead, p.y + spreadY, {
-          size: 18 + Math.random() * (atTurn ? 28 : 22),
-          dx: p.dir * (28 + Math.random() * 40),
-          dy: -(8 + Math.random() * 24) + spreadY * 0.3,
+          size: (18 + Math.random() * (atTurn ? 32 : 24)) * puffScale,
+          dx: p.dir * (32 + Math.random() * 48),
+          dy: -(10 + Math.random() * 28) + spreadY * 0.3,
         });
       }
     }
@@ -4381,6 +4417,9 @@ window.RESULT_IMAGES = {
       ctx.globalCompositeOperation = "source-over";
       ctx.clearRect(0, 0, iw, ih);
 
+      if (pieceClean) {
+        ctx.drawImage(pieceClean, 0, 0);
+      }
       ctx.drawImage(pieceBase, 0, 0);
 
       if (sweptBlurStale) {
