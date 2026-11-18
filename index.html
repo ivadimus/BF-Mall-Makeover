@@ -331,7 +331,7 @@ body {
   top: 7px;
   left: 50%;
   transform: translateX(-50%);
-  height: 161px;
+  height: calc(161px * 1.2);
   width: auto;
   aspect-ratio: 1042 / 371;
   max-width: 92%;
@@ -1658,11 +1658,6 @@ html:not(.is-bare) .device * {
 html:not(.is-bare).web-cursor-pressed .device,
 html:not(.is-bare).web-cursor-pressed .device * {
   cursor: url("assets/web-cursor-48.png") 13 4, pointer !important;
-}
-
-/* Desktop web: Mall Makeover title + Milestones_Bar block (+20% vs bare mobile). */
-html:not(.is-bare) .hud-top-wrap {
-  height: calc(161px * 1.2);
 }
 
   </style>
