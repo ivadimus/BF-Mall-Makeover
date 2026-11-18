@@ -600,8 +600,11 @@ body {
   contain: paint;
 }
 
-.voronoi-layer.is-brush-wiping {
-  transform: translateZ(0);
+/* contain + layer promotion on the whole Voronoi sheet drops SVG feBlur on iOS. */
+@media (pointer: coarse) {
+  .brush-wipe-canvas {
+    contain: none;
+  }
 }
 
 .sponge-sparkles {
@@ -3596,6 +3599,7 @@ window.RESULT_IMAGES = {
     const h = Math.max(1, Math.round(outH != null ? outH : height));
     const rs = w / width;
     const fast = opts && opts.fast;
+    const matchSvg = (opts && opts.matchSvg) || !fast;
     const poly =
       rs === 1
         ? polygon
@@ -3608,10 +3612,14 @@ window.RESULT_IMAGES = {
 
     const expanded = VoronoiReveal.expandPolygon(
       poly,
-      FEATHER * rs * (fast ? 0.72 : 1)
+      FEATHER * rs * (matchSvg ? 1 : fast ? 0.72 : 1)
     );
     let path;
-    if (fast) {
+    if (matchSvg) {
+      path = new Path2D(
+        organicCellPath(expanded, CORNER_RADIUS * rs, EDGE_WAVE * rs)
+      );
+    } else if (fast) {
       let d = "";
       if (expanded.length >= 3) {
         d = `M ${expanded[0].x.toFixed(1)} ${expanded[0].y.toFixed(1)}`;
@@ -3627,8 +3635,13 @@ window.RESULT_IMAGES = {
       );
     }
 
-    let edgeBlur = EDGE_FADE * rs * (rs === 1 ? 1.35 : 1);
-    if (fast) edgeBlur = Math.min(12, Math.max(4, edgeBlur * 0.78));
+    let edgeBlur = EDGE_FADE * rs * (matchSvg || rs === 1 ? 1.35 : 1);
+    if (fast && !matchSvg) {
+      edgeBlur = Math.min(12, Math.max(4, edgeBlur * 0.78));
+    }
+    if (matchSvg && rs < 1) {
+      edgeBlur = Math.min(edgeBlur * 1.08, EDGE_FADE * rs * 1.5);
+    }
     sctx.filter = edgeBlur > 0.35 ? `blur(${edgeBlur}px)` : "none";
     sctx.fillStyle = "#fff";
     sctx.fill(path);
@@ -4042,29 +4055,35 @@ window.RESULT_IMAGES = {
       ih = Math.max(1, Math.round(cropH * rs));
     }
     const coarse = isCoarsePointerDevice();
-    const softEdgeFull = coarse
-      ? null
-      : buildSoftCellMask(width, height, polygon);
+    const maskSceneScale = coarse
+      ? Math.min(1, Math.max(rs, Math.max(cropW / width, cropH / height) * rs * 1.08))
+      : 1;
+    const softEdgeFull = buildSoftCellMask(
+      width,
+      height,
+      polygon,
+      coarse ? Math.max(1, Math.round(width * maskSceneScale)) : undefined,
+      coarse ? Math.max(1, Math.round(height * maskSceneScale)) : undefined,
+      { matchSvg: true }
+    );
     const softEdge = document.createElement("canvas");
     softEdge.width = iw;
     softEdge.height = ih;
     const softEdgeCtx = softEdge.getContext("2d");
     if (softEdgeCtx) {
       softEdgeCtx.imageSmoothingEnabled = true;
-      if (!coarse) softEdgeCtx.imageSmoothingQuality = "high";
-      if (softEdgeFull) {
-        softEdgeCtx.drawImage(softEdgeFull, cropX, cropY, cropW, cropH, 0, 0, iw, ih);
-      } else {
-        const fastMask = buildSoftCellMask(
-          cropW,
-          cropH,
-          localPoly,
-          iw,
-          ih,
-          { fast: true }
-        );
-        softEdgeCtx.drawImage(fastMask, 0, 0);
-      }
+      softEdgeCtx.imageSmoothingQuality = coarse ? "medium" : "high";
+      softEdgeCtx.drawImage(
+        softEdgeFull,
+        Math.round(cropX * maskSceneScale),
+        Math.round(cropY * maskSceneScale),
+        Math.round(cropW * maskSceneScale),
+        Math.round(cropH * maskSceneScale),
+        0,
+        0,
+        iw,
+        ih
+      );
     }
 
     const canvasOpts = coarse
@@ -4079,7 +4098,6 @@ window.RESULT_IMAGES = {
     canvas.style.width = `${cropW}px`;
     canvas.style.height = `${cropH}px`;
     vfxLayer.appendChild(canvas);
-    if (!coarse) svgLayer.classList.add("is-brush-wiping");
     const ctx = canvas.getContext("2d", canvasOpts);
     if (ctx) {
       ctx.imageSmoothingEnabled = true;
@@ -4248,13 +4266,12 @@ window.RESULT_IMAGES = {
       if (finished) return;
       finished = true;
       cancelAnimationFrame(rafId);
-      svgLayer.classList.remove("is-brush-wiping");
       canvas.remove();
       fxLayer.remove();
       commitDustHole(
         softEdgeFull ||
           buildSoftCellMask(width, height, polygon, undefined, undefined, {
-            fast: coarse,
+            matchSvg: true,
           })
       );
       onDone();
@@ -4475,8 +4492,7 @@ window.RESULT_IMAGES = {
       ].join(" ");
       brushEl.style.opacity = alpha.toFixed(3);
 
-      const svgHideT = coarse ? BRUSH_SWEEP_END * 0.72 : BRUSH_PICKUP_END;
-      if (!svgHidden && t >= svgHideT) {
+      if (!svgHidden && (t >= BRUSH_PICKUP_END || prevS > 0.002)) {
         cellEl.classList.add("is-gone");
         svgHidden = true;
       }
