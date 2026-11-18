@@ -1649,14 +1649,14 @@ body {
   .rotate-hint-phone { animation: none; transform: rotate(-90deg); }
 }
 
-/* Desktop web demo: large finger cursor (phone-chrome preview only). */
-html:not(.is-bare) body {
+/* Desktop web demo: finger cursor only inside the phone screen. */
+html:not(.is-bare) .device {
   cursor: none;
 }
 
 .web-tap-hand {
   display: none;
-  position: fixed;
+  position: absolute;
   left: 0;
   top: 0;
   width: 160px;
