@@ -1649,41 +1649,10 @@ body {
   .rotate-hint-phone { animation: none; transform: rotate(-90deg); }
 }
 
-/* Desktop web demo: finger cursor only inside the phone screen. */
-html:not(.is-bare) .device {
-  cursor: none;
-}
-
-.web-tap-hand {
-  display: none;
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 160px;
-  height: auto;
-  margin: 0;
-  padding: 0;
-  pointer-events: none;
-  z-index: 120;
-  transform: translate(-28%, -10%);
-  transform-origin: 28% 10%;
-  filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.35));
-  user-select: none;
-  -webkit-user-drag: none;
-  visibility: hidden;
-  transition: scale 0.08s ease;
-}
-
-html:not(.is-bare) .web-tap-hand {
-  display: block;
-}
-
-html:not(.is-bare) .web-tap-hand.is-active {
-  visibility: visible;
-}
-
-html:not(.is-bare) .web-tap-hand.is-pressed {
-  scale: 0.94;
+/* Desktop web: one native cursor (hand image) inside the phone screen only. */
+html:not(.is-bare) .device,
+html:not(.is-bare) .device * {
+  cursor: url("assets/web-cursor-96.png") 27 8, pointer;
 }
 
   </style>
@@ -1754,14 +1723,6 @@ html:not(.is-bare) .web-tap-hand.is-pressed {
           </div>
           <div class="whiteout" id="whiteout"></div>
         </div>
-        <img
-          class="web-tap-hand"
-          id="web-tap-hand"
-          src="assets/web-cursor-hand.png"
-          alt=""
-          draggable="false"
-          aria-hidden="true"
-        />
       </div>
     </div>
   </div>
@@ -5786,64 +5747,6 @@ window.RESULT_IMAGES = {
       }
 
       document.addEventListener("pointerdown", goFullScreen, { once: true });
-    })();
-  </script>
-  <script>
-    (function () {
-      var root = document.documentElement;
-      var hand = document.getElementById("web-tap-hand");
-      var device = document.querySelector(".device");
-      if (!hand || !device) return;
-
-      function webDemo() {
-        return !root.classList.contains("is-bare");
-      }
-
-      function insideDevice(clientX, clientY) {
-        var r = device.getBoundingClientRect();
-        return (
-          clientX >= r.left &&
-          clientX <= r.right &&
-          clientY >= r.top &&
-          clientY <= r.bottom
-        );
-      }
-
-      function placeHand(clientX, clientY) {
-        var r = device.getBoundingClientRect();
-        hand.style.left = clientX - r.left + "px";
-        hand.style.top = clientY - r.top + "px";
-      }
-
-      function onMove(e) {
-        if (!webDemo()) return;
-        if (!insideDevice(e.clientX, e.clientY)) {
-          hand.classList.remove("is-active", "is-pressed");
-          return;
-        }
-        hand.classList.add("is-active");
-        placeHand(e.clientX, e.clientY);
-      }
-
-      function onDown(e) {
-        if (!webDemo()) return;
-        if (!insideDevice(e.clientX, e.clientY)) return;
-        hand.classList.add("is-pressed");
-      }
-
-      function onUp() {
-        hand.classList.remove("is-pressed");
-      }
-
-      function onLeave() {
-        hand.classList.remove("is-active", "is-pressed");
-      }
-
-      window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerdown", onDown);
-      window.addEventListener("pointerup", onUp);
-      window.addEventListener("blur", onLeave);
-      document.addEventListener("mouseleave", onLeave);
     })();
   </script>
 </body>
